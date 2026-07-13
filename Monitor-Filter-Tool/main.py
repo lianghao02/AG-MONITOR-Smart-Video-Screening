@@ -251,8 +251,6 @@ def batch_rename_videos(keep_old_name=True):
             except Exception as e:
                 print(f"Rename failed for {path}: {e}")
                 new_queue.append(path)
-            else:
-                new_queue.append(path)
                 
         eel.updateRenameProgress(total, total)()
         video_queue = new_queue
