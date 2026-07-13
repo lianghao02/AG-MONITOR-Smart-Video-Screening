@@ -1312,6 +1312,13 @@ def save_legal_screenshot(frame, output_dir, time_code, objects_list, prefix_nam
         dlog(f"[DEBUG-SAVE] makedirs failed: {e}")
         return
 
+    MIN_WIDTH = 1280
+    if frame.shape[1] < MIN_WIDTH:
+        scale = MIN_WIDTH / frame.shape[1]
+        new_w = int(frame.shape[1] * scale)
+        new_h = int(frame.shape[0] * scale)
+        frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(frame_rgb)
     draw = ImageDraw.Draw(pil_img)
