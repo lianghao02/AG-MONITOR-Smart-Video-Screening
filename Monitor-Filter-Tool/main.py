@@ -1011,10 +1011,13 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                                 
                 final_targets = []
                 frame_w = frame.shape[1]
-                # 若為低解析度(如 352px)，設定較小的粗細與字體大小，以便後續放大 1280px 時比例正常
-                base_scale = frame_w / 1280.0
-                thick = max(1, int(2 * base_scale))
-                font_scale = max(0.3, 0.5 * base_scale)
+                # 依據解析度動態調整線條與字體粗細 (避免 1080p 以上線條過粗)
+                if frame_w < 1280:
+                    thick, font_thick, font_scale = 1, 1, 0.4
+                elif frame_w < 2000:
+                    thick, font_thick, font_scale = 2, 1, 0.6
+                else:
+                    thick, font_thick, font_scale = 3, 2, 0.8
                 
                 for i, t in enumerate(valid_targets):
                     if i not in drop_indices:
@@ -1023,7 +1026,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                         cls_id, tid, conf = t['cls_id'], t['tid'], t['conf']
                         cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), thick)
                         cv2.putText(annotated_frame, f"ID:{tid} {CONFIG.TARGET_CLASSES[cls_id]} {conf:.2f}",
-                            (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), thick)
+                            (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), font_thick)
                 
                 valid_targets = final_targets
 
