@@ -1052,6 +1052,12 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                         target_frame_idx = max(0, target_frame_idx - static_skip_step)
                         is_dynamic_mode = True
                         
+                        # 重置 YOLO 追蹤器：因為我們即將「時光倒流」回到過去的影格，
+                        # 若不重置，Tracker 內部的 Kalman Filter 歷史紀錄會在未來，
+                        # 導致接下來幾幀的目標全部無法匹配而被拋棄，進而引發無限迴圈。
+                        if hasattr(model, 'predictor'):
+                            model.predictor = None
+                        
                         if is_raw_stream:
                             # Raw 流：絕對不能 seek，直接保留現有迭代器，重置 target 計數器即可
                             target_frame_idx = old_target
