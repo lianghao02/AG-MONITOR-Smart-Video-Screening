@@ -1098,9 +1098,9 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             # 前端除錯提示：讓使用者確認 Timecode 是否有在穩定前進，沒有卡死
                             eel.appendLog(f"[{time_code_str}] ⏩ 空景閃現推進中... (設定間距: {skip_sec}s)", "info")
                             
-                            # Backend debug (now pushed to UI for the user to see)
+                            # Backend debug (隱藏於 UI，寫入背景日誌檔)
                             debug_msg = f"[DEBUG] target={target_frame_idx}, skip={static_skip_step}, fps={fps}, last_idx={last_received_idx}"
-                            eel.appendLog(debug_msg, "warn")()
+                            dlog(debug_msg)
                         continue
                 else:
                     if not motion_detected and target_frame_idx >= dynamic_lock_until:
