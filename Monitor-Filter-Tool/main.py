@@ -1049,7 +1049,13 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     if motion_detected:
                         dynamic_lock_until = target_frame_idx
                         old_target = target_frame_idx
-                        target_frame_idx = max(0, target_frame_idx - static_skip_step)
+                        
+                        # 確保給予追蹤器至少 0.5 秒的「起跑準備時間 (Run-up time)」，
+                        # 否則像 0.2s 這種極短的跳躍，會導致 ByteTrack 還沒確立目標就撞到 lock_until，
+                        # 進而引發不斷退出又被 predict 抓回來的「搞1秒重複」跳回迴圈。
+                        run_up_frames = max(int(fps * 0.5), static_skip_step)
+                        target_frame_idx = max(0, target_frame_idx - run_up_frames)
+                        
                         is_dynamic_mode = True
                         
                         # 重置 YOLO 追蹤器：因為我們即將「時光倒流」回到過去的影格，
