@@ -99,7 +99,7 @@ def add_videos_dialog():
     root.withdraw()
     files = filedialog.askopenfilenames(
         title="選擇視訊檔案",
-        filetypes=[("視訊檔案", "*.mp4 *.avi *.mkv *.mov *.h264 *.h265 *.264 *.265 *.dav *.flv *.ts *.wmv")]
+        filetypes=[("視訊檔案", "*.mp4 *.avi *.mkv *.mov *.m4v *.h264 *.h265 *.264 *.265 *.dav *.flv *.ts *.wmv")]
     )
     root.destroy()
     
@@ -127,8 +127,8 @@ def add_folder_dialog():
     if not folder_path:
         return []
 
-    valid_extensions = {".mp4", ".avi", ".mkv", ".mov", ".h264", ".h265", ".264", ".265", ".dav", ".flv", ".ts", ".wmv",
-                        ".mp4]", ".avi]", ".mkv]", ".mov]", ".h264]", ".h265]", ".264]", ".265]", ".dav]", ".flv]", ".ts]", ".wmv]"}
+    valid_extensions = {".mp4", ".avi", ".mkv", ".mov", ".m4v", ".h264", ".h265", ".264", ".265", ".dav", ".flv", ".ts", ".wmv",
+                        ".mp4]", ".avi]", ".mkv]", ".mov]", ".m4v]", ".h264]", ".h265]", ".264]", ".265]", ".dav]", ".flv]", ".ts]", ".wmv]"}
     added_paths = []
     
     with list_lock:
@@ -422,7 +422,7 @@ def process_wrapper(video_path, video_name, settings, batch_output_dir, ui_queue
     import time
     from ultralytics import YOLO
     
-    this_module = sys.modules[__name__]
+    global eel, stop_requested, skip_video_path, player_state, global_live_settings, roi_points, scale_info, model
     
     class MockEel:
         def __getattr__(self, name):
@@ -431,30 +431,31 @@ def process_wrapper(video_path, video_name, settings, batch_output_dir, ui_queue
                 return lambda: None
             return wrapper
             
-    this_module.eel = MockEel()
+    eel = MockEel()
     
-    this_module.stop_requested = False
-    this_module.skip_video_path = None
-    this_module.player_state = shared_state.get('player_state', {})
-    this_module.global_live_settings = shared_state.get('live_settings', {})
-    this_module.roi_points = shared_state.get('roi_points', [])
-    this_module.scale_info = shared_state.get('scale_info', None)
+    stop_requested = False
+    skip_video_path = None
+    player_state = shared_state.get('player_state', {})
+    global_live_settings = shared_state.get('live_settings', {})
+    roi_points = shared_state.get('roi_points', [])
+    scale_info = shared_state.get('scale_info', None)
     
     sub_sync_running = True
     def sub_sync_thread():
+        global stop_requested, skip_video_path, player_state, global_live_settings, roi_points, scale_info
         while sub_sync_running:
-            this_module.stop_requested = shared_state.get('stop_requested', False)
-            this_module.skip_video_path = shared_state.get('skip_video_path', None)
-            this_module.player_state = shared_state.get('player_state', {})
-            this_module.global_live_settings = shared_state.get('live_settings', {})
-            this_module.roi_points = shared_state.get('roi_points', [])
-            this_module.scale_info = shared_state.get('scale_info', None)
+            stop_requested = shared_state.get('stop_requested', False)
+            skip_video_path = shared_state.get('skip_video_path', None)
+            player_state = shared_state.get('player_state', {})
+            global_live_settings = shared_state.get('live_settings', {})
+            roi_points = shared_state.get('roi_points', [])
+            scale_info = shared_state.get('scale_info', None)
             time.sleep(0.05)
             
     threading.Thread(target=sub_sync_thread, daemon=True).start()
     
-    this_module.eel.updateStatus(f"狀態: 正在載入 {model_name}大腦...", "ok")()
-    this_module.model = YOLO(model_name)
+    eel.updateStatus(f"狀態: 正在載入 {model_name}大腦...", "ok")()
+    model = YOLO(model_name)
     
     try:
         process_single_video(video_path, video_name, settings, batch_output_dir)
@@ -462,7 +463,7 @@ def process_wrapper(video_path, video_name, settings, batch_output_dir, ui_queue
     except Exception as e:
         import traceback
         err = traceback.format_exc()
-        this_module.eel.appendLog(f"影片 {video_name} 發生致命崩潰，已觸發看門狗安全略過: {str(e)}", "danger")()
+        eel.appendLog(f"影片 {video_name} 發生致命崩潰，已觸發看門狗安全略過: {str(e)}", "danger")()
         print(err)
         sys.exit(1)
     finally:
@@ -616,6 +617,13 @@ def parse_start_time(filename):
     match_15 = re.search(r'(20\d{6}_\d{6})', filename)
     if match_15:
         try: return datetime.strptime(match_15.group(1), "%Y%m%d_%H%M%S")
+        except: pass
+
+    match_h_m = re.search(r'(20\d{6}_\d{2}h\d{2}m)', filename)
+    if match_h_m:
+        try:
+            time_str = match_h_m.group(1).replace('h', '').replace('m', '') + '00'
+            return datetime.strptime(time_str, "%Y%m%d_%H%M%S")
         except: pass
         
     match_14 = re.search(r'(20\d{12})', filename)
