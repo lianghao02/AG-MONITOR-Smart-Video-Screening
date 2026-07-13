@@ -1058,11 +1058,12 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                         
                         is_dynamic_mode = True
                         
-                        # 重置 YOLO 追蹤器：因為我們即將「時光倒流」回到過去的影格，
-                        # 若不重置，Tracker 內部的 Kalman Filter 歷史紀錄會在未來，
-                        # 導致接下來幾幀的目標全部無法匹配而被拋棄，進而引發無限迴圈。
+                        # 重置 YOLO 追蹤器
                         if hasattr(model, 'predictor'):
                             model.predictor = None
+                            
+                        # 前端除錯提示：讓使用者確切看到「退回了多少幀 (時間)」以作為暖機
+                        eel.appendLog(f"[{time_code_str}] 靜態掃描發現目標！觸發時光倒流防護，退回 {run_up_frames} 幀以供 Tracker 暖機鎖定。", "warning")
                         
                         if is_raw_stream:
                             # Raw 流：絕對不能 seek，直接保留現有迭代器，重置 target 計數器即可
