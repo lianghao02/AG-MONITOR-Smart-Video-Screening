@@ -1010,28 +1010,11 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                                     break
                                 
                 final_targets = []
-                frame_w = frame.shape[1]
-                # 依據解析度動態調整線條與字體粗細 (避免 1080p 以上線條過粗)
-                if frame_w < 1280:
-                    thick, font_thick, font_scale = 1, 1, 0.4
-                elif frame_w < 2000:
-                    thick, font_thick, font_scale = 2, 1, 0.6
-                else:
-                    thick, font_thick, font_scale = 3, 2, 0.8
-                
                 for i, t in enumerate(valid_targets):
                     if i not in drop_indices:
                         final_targets.append(t)
-                        x1, y1, x2, y2 = t['xyxy']
-                        cls_id, tid, conf = t['cls_id'], t['tid'], t['conf']
-                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), thick)
-                        cv2.putText(annotated_frame, f"ID:{tid} {CONFIG.TARGET_CLASSES[cls_id]} {conf:.2f}",
-                            (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), font_thick)
                 
                 valid_targets = final_targets
-
-                if real_roi_poly is not None:
-                    cv2.polylines(annotated_frame, [real_roi_poly], True, (0, 255, 0), 1)
 
                 # ---------------- Motion & Skip Logic ----------------
                 motion_detected = len(valid_targets) > 0
@@ -1168,11 +1151,14 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                                 'best_conf': conf,
                                 'start_frame': annotated_frame.copy(),
                                 'start_timecode': time_code_str,
+                                'start_target_info': target.copy(),
                                 'best_frame': annotated_frame.copy(),
                                 'best_timecode': time_code_str,
                                 'best_summary': [f"{summary_str}({conf:.2f} Peak)"],
+                                'best_target_info': target.copy(),
                                 'last_frame': annotated_frame.copy(),
                                 'last_timecode': time_code_str,
+                                'last_target_info': target.copy(),
                                 'last_seen_msec': milliseconds,
                                 'last_continuous_capture_msec': milliseconds,
                                 'last_centroid': (cx, cy),
@@ -1188,6 +1174,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                         state['last_seen_msec'] = milliseconds
                         state['last_frame'] = annotated_frame.copy()
                         state['last_timecode'] = time_code_str
+                        state['last_target_info'] = target.copy()
                         state['last_centroid'] = (cx, cy)
                         state['last_box_size'] = (w, h)
                         
@@ -1196,6 +1183,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             state['best_frame'] = annotated_frame.copy()
                             state['best_timecode'] = time_code_str
                             state['best_summary'] = [f"{summary_str}({conf:.2f} Peak)"]
+                            state['best_target_info'] = target.copy()
                             
                         if not state['is_moving']:
                             # 比較與初始位置的總位移，避免 YOLO 邊界框的單幀抖動被誤判為移動
@@ -1215,10 +1203,10 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             state['entry_captured'] = True
                             dlog(f"[DEBUG-CAPTURE] 準備截圖! mode={capture_mode} output_dir={output_dir}")
                             if capture_mode in ["雙格蒐證模式 (起點+最清晰)", "事件起訖模式"]:
-                                save_legal_screenshot(state['start_frame'], output_dir, state['start_timecode'], [f"ID:{tid} {state['class_name']}(Entry)"], clean_v_name)
+                                save_legal_screenshot(state['start_frame'], output_dir, state['start_timecode'], [f"ID:{tid} {state['class_name']}(Entry)"], clean_v_name, state.get('start_target_info'))
                                 eel.appendLog(f"[{state['start_timecode']}] 擷取 ID:{tid} {state['class_name']}(Entry)", "success")
                             elif capture_mode == "持續追蹤模式 (預設)":
-                                save_legal_screenshot(state['start_frame'], output_dir, state['start_timecode'], [f"ID:{tid} {state['class_name']}(Track-Entry)"], clean_v_name)
+                                save_legal_screenshot(state['start_frame'], output_dir, state['start_timecode'], [f"ID:{tid} {state['class_name']}(Track-Entry)"], clean_v_name, state.get('start_target_info'))
                                 eel.appendLog(f"[{state['start_timecode']}] 擷取 ID:{tid} {state['class_name']}(Track-Entry)", "success")
                     
                     if capture_mode == "持續追蹤模式 (預設)":
@@ -1226,7 +1214,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                         if state['is_moving']:
                             if (milliseconds - state['last_continuous_capture_msec']) >= 3000:
                                 state['last_continuous_capture_msec'] = milliseconds
-                                save_legal_screenshot(annotated_frame, output_dir, time_code_str, [f"{summary_str}(Track)"], clean_v_name)
+                                save_legal_screenshot(annotated_frame, output_dir, time_code_str, [f"{summary_str}(Track)"], clean_v_name, target)
                                 eel.appendLog(f"[{time_code_str}] 擷取 {summary_str}(Track)", "success")
 
                 if engine_mode == 'auto' and is_dynamic_mode:
@@ -1323,11 +1311,11 @@ def _run_grace_period_gc(curr_msec, track_states, capture_mode, output_dir, pref
         else:
             if capture_mode in ["雙格蒐證模式 (起點+最清晰)", "單次最清晰模式 (推薦)"]:
                 if state['best_frame'] is not None:
-                    save_legal_screenshot(state['best_frame'], output_dir, state['best_timecode'], state['best_summary'], prefix_name)
+                    save_legal_screenshot(state['best_frame'], output_dir, state['best_timecode'], state['best_summary'], prefix_name, state.get('best_target_info'))
                     eel.appendLog(f"[{state['best_timecode']}] 擷取 {state['best_summary'][0]}", "success")
             elif capture_mode == "事件起訖模式":
                 if state['last_frame'] is not None:
-                    save_legal_screenshot(state['last_frame'], output_dir, state['last_timecode'], [f"ID:{tid} {state['class_name']}(Exit)"], prefix_name)
+                    save_legal_screenshot(state['last_frame'], output_dir, state['last_timecode'], [f"ID:{tid} {state['class_name']}(Exit)"], prefix_name, state.get('last_target_info'))
                     eel.appendLog(f"[{state['last_timecode']}] 擷取 ID:{tid} {state['class_name']}(Exit)", "success")
         del track_states[tid]
 
@@ -1337,11 +1325,11 @@ def _flush_all_track_states(track_states, capture_mode, output_dir, prefix_name,
             continue
         if capture_mode in ["雙格蒐證模式 (起點+最清晰)", "單次最清晰模式 (推薦)"]:
             if state['best_frame'] is not None:
-                save_legal_screenshot(state['best_frame'], output_dir, state['best_timecode'], state['best_summary'], prefix_name)
+                save_legal_screenshot(state['best_frame'], output_dir, state['best_timecode'], state['best_summary'], prefix_name, state.get('best_target_info'))
                 eel.appendLog(f"[{state['best_timecode']}] 擷取 {state['best_summary'][0]}", "success")
         elif capture_mode == "事件起訖模式":
             if state['last_frame'] is not None:
-                save_legal_screenshot(state['last_frame'], output_dir, state['last_timecode'], [f"ID:{tid} {state['class_name']}(Exit)"], prefix_name)
+                save_legal_screenshot(state['last_frame'], output_dir, state['last_timecode'], [f"ID:{tid} {state['class_name']}(Exit)"], prefix_name, state.get('last_target_info'))
                 eel.appendLog(f"[{state['last_timecode']}] 擷取 ID:{tid} {state['class_name']}(Exit)", "success")
     track_states.clear()
 
