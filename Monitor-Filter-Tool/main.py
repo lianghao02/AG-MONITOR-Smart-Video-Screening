@@ -416,14 +416,68 @@ def get_real_roi_polygon():
         real_pts.append([rx, ry])
     return np.array(real_pts, dtype=np.int32)
 
+def process_wrapper(video_path, video_name, settings, batch_output_dir, ui_queue, shared_state, model_name):
+    import sys
+    import threading
+    import time
+    from ultralytics import YOLO
+    
+    this_module = sys.modules[__name__]
+    
+    class MockEel:
+        def __getattr__(self, name):
+            def wrapper(*args, **kwargs):
+                ui_queue.put((name, args, kwargs))
+                return lambda: None
+            return wrapper
+            
+    this_module.eel = MockEel()
+    
+    this_module.stop_requested = False
+    this_module.skip_video_path = None
+    this_module.player_state = shared_state.get('player_state', {})
+    this_module.global_live_settings = shared_state.get('live_settings', {})
+    this_module.roi_points = shared_state.get('roi_points', [])
+    this_module.scale_info = shared_state.get('scale_info', None)
+    
+    sub_sync_running = True
+    def sub_sync_thread():
+        while sub_sync_running:
+            this_module.stop_requested = shared_state.get('stop_requested', False)
+            this_module.skip_video_path = shared_state.get('skip_video_path', None)
+            this_module.player_state = shared_state.get('player_state', {})
+            this_module.global_live_settings = shared_state.get('live_settings', {})
+            this_module.roi_points = shared_state.get('roi_points', [])
+            this_module.scale_info = shared_state.get('scale_info', None)
+            time.sleep(0.05)
+            
+    threading.Thread(target=sub_sync_thread, daemon=True).start()
+    
+    this_module.eel.updateStatus(f"狀態: 正在載入 {model_name}大腦...", "ok")()
+    this_module.model = YOLO(model_name)
+    
+    try:
+        process_single_video(video_path, video_name, settings, batch_output_dir)
+        sys.exit(0)
+    except Exception as e:
+        import traceback
+        err = traceback.format_exc()
+        this_module.eel.appendLog(f"影片 {video_name} 發生致命崩潰，已觸發看門狗安全略過: {str(e)}", "danger")()
+        print(err)
+        sys.exit(1)
+    finally:
+        sub_sync_running = False
+
+
 def batch_processing_worker(settings):
     global is_processing, model, current_model_name, skip_video_path
+    import multiprocessing
+    import queue
+    import traceback
+    import gc
+    
     try:
         model_name = settings.get("aiModel", "yolov8n.pt")
-        if model is None or globals().get('current_model_name') != model_name:
-            eel.updateStatus(f"狀態: 正在載入 {model_name}大腦...", "ok")
-            model = YOLO(model_name)
-            globals()['current_model_name'] = model_name
 
         with list_lock:
             q = list(video_queue)
@@ -446,30 +500,86 @@ def batch_processing_worker(settings):
         write_report(f"極速背景處理: {'開啟' if settings.get('fastMode', True) else '關閉'}")
         write_report("=========================================\n")
 
+        manager = multiprocessing.Manager()
+        ui_queue = manager.Queue()
+        shared_state = manager.dict({
+            'stop_requested': False,
+            'skip_video_path': None,
+            'player_state': player_state,
+            'live_settings': global_live_settings,
+            'roi_points': roi_points,
+            'scale_info': scale_info
+        })
+        
+        sync_running = True
+        def state_sync_thread():
+            while sync_running:
+                shared_state['stop_requested'] = stop_requested
+                shared_state['skip_video_path'] = skip_video_path
+                shared_state['player_state'] = player_state
+                shared_state['live_settings'] = global_live_settings
+                shared_state['roi_points'] = roi_points
+                shared_state['scale_info'] = scale_info
+                time.sleep(0.05)
+                
+        threading.Thread(target=state_sync_thread, daemon=True).start()
+        
+        def ui_listener_thread():
+            while sync_running:
+                try:
+                    msg = ui_queue.get(timeout=0.1)
+                    if msg == "STOP": break
+                    name, args, kwargs = msg
+                    func = getattr(eel, name, None)
+                    if func:
+                        func(*args, **kwargs)()
+                except queue.Empty:
+                    pass
+                except Exception:
+                    pass
+                    
+        threading.Thread(target=ui_listener_thread, daemon=True).start()
+
         current_idx = 0
         while current_idx < total_v:
             if stop_requested:
                 break
             
             video_path = q[current_idx]
+            # Reset skip path for next video
+            global skip_video_path
             skip_video_path = None
+            shared_state['skip_video_path'] = None
+            
             v_name = os.path.basename(video_path)
             
             eel.updateStatus(f"狀態: 正在分析 ({current_idx + 1}/{total_v}) {v_name}", "ok")
             eel.appendLog(f"開始載入影片: {v_name}", "info")
             write_report(f"▶ 開始分析影片: {v_name}")
-            try:
-                process_single_video(video_path, v_name, settings, batch_output_dir)
-                write_report(f"✅ 完成分析影片: {v_name}\n")
-            except Exception as e:
-                import traceback
-                write_report(f"❌ 發生崩潰錯誤: {str(e)}\n")
-                dlog(traceback.format_exc())
+            
+            p = multiprocessing.Process(
+                target=process_wrapper, 
+                args=(video_path, v_name, settings, batch_output_dir, ui_queue, shared_state, model_name)
+            )
+            p.start()
+            
+            # Watchdog loop: wait for process to finish or crash, while staying responsive to stop requests
+            while p.is_alive():
+                if stop_requested:
+                    shared_state['stop_requested'] = True
+                p.join(timeout=0.5)
+            
+            if p.exitcode != 0:
+                write_report(f"❌ 發生致命崩潰錯誤 (看門狗已介入)\n")
+                
+            write_report(f"✅ 完成分析影片: {v_name}\n")
             gc.collect()
             
-            if skip_video_path is not None:
+            # Check if user requested to skip to a specific video during this process
+            skip_path = shared_state['skip_video_path']
+            if skip_path is not None:
                 try:
-                    current_idx = q.index(skip_video_path)
+                    current_idx = q.index(skip_path)
                 except ValueError:
                     current_idx += 1
             else:
@@ -489,6 +599,7 @@ def batch_processing_worker(settings):
         eel.appendLog(f"系統崩潰: {str(e)}", "error")
         print(err_msg)
     finally:
+        sync_running = False
         is_processing = False
         eel.processingFinished()
 
@@ -1446,6 +1557,8 @@ def save_enhanced_evidence(base64_str, mode='plate'):
         return False
 
 if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
     os.makedirs(CONFIG.CAPTURES_DIR, exist_ok=True)
     try:
         web_dir = os.path.join(CONFIG.BASE_DIR, 'web')
