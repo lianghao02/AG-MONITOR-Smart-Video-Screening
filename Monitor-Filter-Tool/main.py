@@ -1091,6 +1091,9 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             cv2.putText(annotated_frame, osd_text, (10, frame_h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
                             push_frame_to_ui(frame, [], real_roi_poly, time_code_str)
                             last_ui_update = _now
+                            
+                            # 前端除錯提示：讓使用者確認 Timecode 是否有在穩定前進，沒有卡死
+                            eel.appendLog(f"[{time_code_str}] ⏩ 空景閃現推進中... (設定間距: {skip_sec}s)", "info")
                         continue
                 else:
                     if not motion_detected and target_frame_idx >= dynamic_lock_until:
