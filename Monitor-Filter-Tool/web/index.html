@@ -915,9 +915,15 @@
             appendLog(">>> 任務結束或已手動中止", "info");
         }
 
+        let currentBoxes = [];
+        let currentOsdText = "";
+
         eel.expose(setPreviewImage);
-        function setPreviewImage(base64Data, scaleInfoObj) {
+        function setPreviewImage(base64Data, scaleInfoObj, jsonBoxes=[], roiPts=[], timeCodeStr="") {
             scaleInfo = scaleInfoObj;
+            currentBoxes = jsonBoxes;
+            currentOsdText = timeCodeStr;
+            
             document.getElementById("placeholderText").style.display = "none";
             let canvas = document.getElementById("previewCanvas");
             canvas.width = scaleInfo.canvas_w;
@@ -948,6 +954,39 @@
             let ctx = canvas.getContext("2d");
             ctx.clearRect(0, 0, canvas.width, canvas.height);
             ctx.drawImage(currentImage, 0, 0);
+            
+            if(currentOsdText) {
+                ctx.font = "16px 'Segoe UI', Arial, sans-serif";
+                let text = "AG-MONITOR | " + currentOsdText;
+                let metrics = ctx.measureText(text);
+                ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
+                ctx.fillRect(5, canvas.height - 25, metrics.width + 10, 20);
+                ctx.fillStyle = "#00FFFF";
+                ctx.fillText(text, 10, canvas.height - 6);
+            }
+
+            if(currentBoxes && currentBoxes.length > 0) {
+                for(let box of currentBoxes) {
+                    let w = box.x2 - box.x1;
+                    let h = box.y2 - box.y1;
+                    
+                    ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+                    ctx.shadowBlur = 4;
+                    ctx.strokeStyle = "#FF3366";
+                    ctx.lineWidth = 2;
+                    ctx.strokeRect(box.x1, box.y1, w, h);
+                    ctx.shadowBlur = 0;
+                    
+                    let label = "ID:" + box.tid + " " + box.cls_name + " " + box.conf.toFixed(2);
+                    ctx.font = "bold 12px 'Segoe UI', Arial, sans-serif";
+                    let tw = ctx.measureText(label).width;
+                    
+                    ctx.fillStyle = "rgba(255, 51, 102, 0.85)";
+                    ctx.fillRect(box.x1, box.y1 - 18, tw + 6, 18);
+                    ctx.fillStyle = "#FFFFFF";
+                    ctx.fillText(label, box.x1 + 3, box.y1 - 5);
+                }
+            }
             
             if(roiPoints.length > 0) {
                 ctx.strokeStyle = "#00FF66";

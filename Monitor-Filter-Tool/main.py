@@ -10,6 +10,8 @@ import base64
 import math
 import re
 import urllib.request
+import zipfile
+import subprocess
 from datetime import datetime, timedelta
 import threading
 from threading import Thread
@@ -727,7 +729,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             target_frame_idx += 1
                             _now = time.time()
                             if _now - last_ui_update > 0.5:
-                                push_frame_to_ui(frame)
+                                push_frame_to_ui(frame, [], None, time_code_str)
                                 last_ui_update = _now
                             if _now - last_progress_update > 0.2:
                                 ms = (target_frame_idx / fps) * 1000
@@ -897,7 +899,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             (tw, th), _ = cv2.getTextSize(osd_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
                             cv2.rectangle(annotated_frame, (5, frame_h - th - 15), (5 + tw + 10, frame_h - 5), (0, 0, 0), -1)
                             cv2.putText(annotated_frame, osd_text, (10, frame_h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                            push_frame_to_ui(annotated_frame)
+                            push_frame_to_ui(frame, [], real_roi_poly, time_code_str)
                             last_ui_update = _now
                         continue
                 else:
@@ -918,7 +920,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             (tw, th), _ = cv2.getTextSize(osd_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
                             cv2.rectangle(annotated_frame, (5, frame_h - th - 15), (5 + tw + 10, frame_h - 5), (0, 0, 0), -1)
                             cv2.putText(annotated_frame, osd_text, (10, frame_h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
-                            push_frame_to_ui(annotated_frame)
+                            push_frame_to_ui(frame, [], real_roi_poly, time_code_str)
                             last_ui_update = _now
                         continue
 
@@ -1042,7 +1044,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                 cv2.putText(annotated_frame, osd_text, (10, frame_h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
                 if not fast_mode:
-                    push_frame_to_ui(annotated_frame)
+                    push_frame_to_ui(frame, valid_targets, real_roi_poly, time_code_str)
                     
                 # 每幀都執行 GC，確保已移動物件在消失後立即儲存截圖
                 filter_stationary = settings.get('filterStationary', True)
@@ -1070,7 +1072,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         if fh:
             fh.close()
 
-def push_frame_to_ui(frame):
+def push_frame_to_ui(frame, valid_targets=[], roi_poly=None, time_code_str=""):
     canvas_w, canvas_h = 800, 600
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     img_h, img_w, _ = frame_rgb.shape
@@ -1084,7 +1086,29 @@ def push_frame_to_ui(frame):
     _, buffer = cv2.imencode('.jpg', cv2.cvtColor(canvas_img, cv2.COLOR_RGB2BGR))
     b64_str = base64.b64encode(buffer).decode('utf-8')
     info_obj = {"scale": scale, "pad_x": pad_x, "pad_y": pad_y, "canvas_w": canvas_w, "canvas_h": canvas_h}
-    eel.setPreviewImage(b64_str, info_obj)()
+    
+    json_boxes = []
+    for t in valid_targets:
+        x1, y1, x2, y2 = t['xyxy']
+        json_boxes.append({
+            'tid': t['tid'],
+            'cls_name': CONFIG.TARGET_CLASSES[t['cls_id']],
+            'conf': float(t['conf']),
+            'x1': float(x1 * scale + pad_x),
+            'y1': float(y1 * scale + pad_y),
+            'x2': float(x2 * scale + pad_x),
+            'y2': float(y2 * scale + pad_y)
+        })
+        
+    roi_pts = []
+    if roi_poly is not None:
+        for pt in roi_poly:
+            roi_pts.append({
+                'x': float(pt[0][0] * scale + pad_x),
+                'y': float(pt[0][1] * scale + pad_y)
+            })
+
+    eel.setPreviewImage(b64_str, info_obj, json_boxes, roi_pts, time_code_str)()
 
 def _run_grace_period_gc(curr_msec, track_states, capture_mode, output_dir, prefix_name, filter_stationary=True):
     expired_ids = []
@@ -1206,35 +1230,42 @@ def save_legal_screenshot(frame, output_dir, time_code, objects_list, prefix_nam
         write_report(f"  ❌ [截圖失敗] 寫入異常: {str(e)}")
 
 # ==========================================
-# 數位鑑識 AI 影像超解析工作站 (Super-Resolution)
+# 鑑識超解析 (Super Resolution) - NCNN 模組
 # ==========================================
-SR_MODEL_PATH = os.path.join(CONFIG.BASE_DIR, 'ESPCN_x2.pb')
-SR_MODEL_URL = 'https://raw.githubusercontent.com/fannymonori/TF-ESPCN/master/export/ESPCN_x2.pb'
+NCNN_MODEL_DIR = os.path.join(CONFIG.BASE_DIR, 'models', 'realesrgan')
+NCNN_EXE_PATH = os.path.join(NCNN_MODEL_DIR, 'realesrgan-ncnn-vulkan.exe')
+NCNN_DOWNLOAD_URL = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip'
+NCNN_ZIP_PATH = os.path.join(CONFIG.BASE_DIR, 'realesrgan-windows.zip')
 
 sr_abort_flag = False
 
 def check_and_download_sr_model():
     global sr_abort_flag
-    if not os.path.exists(SR_MODEL_PATH):
-        print(">>> [系統預檢] 偵測到本機缺乏 AI 超解析權重檔 (ESPCN_x2.pb)")
-        print(">>> [系統動作] 正在背景非同步下載輕量化鑑識模型，請稍候...")
+    if not os.path.exists(NCNN_EXE_PATH):
+        print(">>> [系統預檢] 偵測到本機缺乏 NCNN 超解析引擎 (realesrgan-ncnn-vulkan.exe)")
+        print(">>> [系統動作] 正在背景非同步下載免安裝引擎，請稍候 (約 25MB)...")
         try:
-            req = urllib.request.urlopen(SR_MODEL_URL, timeout=15)
-            with open(SR_MODEL_PATH, 'wb') as f:
+            os.makedirs(NCNN_MODEL_DIR, exist_ok=True)
+            req = urllib.request.urlopen(NCNN_DOWNLOAD_URL, timeout=30)
+            with open(NCNN_ZIP_PATH, 'wb') as f:
                 while True:
                     if sr_abort_flag:
-                        print(">>> [系統動作] 使用者已強制中止 AI 模型下載！")
+                        print(">>> [系統動作] 使用者已強制中止引擎下載！")
                         return False
                     chunk = req.read(8192)
                     if not chunk:
                         break
                     f.write(chunk)
-            print(">>> [系統動作] AI 模型下載完成！")
+            print(">>> [系統動作] 下載完成，正在解壓縮引擎...")
+            with zipfile.ZipFile(NCNN_ZIP_PATH, 'r') as zip_ref:
+                zip_ref.extractall(NCNN_MODEL_DIR)
+            os.remove(NCNN_ZIP_PATH)
+            print(">>> [系統動作] NCNN 引擎解壓縮完成！")
         except Exception as e:
-            print(f"❌ [數位鑑識崩潰]：模型權重檔下載失敗 ({e})")
-            print("💡 [系統處置建議]：請確認對外網路連線，或手動將 ESPCN_x2.pb 放置於專案根目錄。")
-            if os.path.exists(SR_MODEL_PATH):
-                os.remove(SR_MODEL_PATH)
+            print(f"❌ [數位鑑識崩潰]：NCNN 引擎下載失敗 ({e})")
+            print("💡 [系統處置建議]：請確認對外網路連線，或手動下載並解壓縮至 models/realesrgan/ 目錄。")
+            if os.path.exists(NCNN_ZIP_PATH):
+                os.remove(NCNN_ZIP_PATH)
             return False
     return True
 
@@ -1259,54 +1290,75 @@ def run_ai_super_resolution(base64_str, mode='plate'):
                 eel.on_super_res_finished(None, "❌ 影像解碼失敗，請確認檔案格式是否正確。")()
                 return
 
-            if mode == 'face':
-                print(">>> [系統動作] 發動人像五官模式前置處理：套用 Non-Local Means Denoising 抹除壓縮區塊...")
-                # 在放大之前先強制去噪，避免 ESPCN 或是 Lanczos 把雜訊與馬賽克當作「邊緣」強化
-                img = cv2.fastNlMeansDenoisingColored(img, None, h=10, hColor=10, templateWindowSize=7, searchWindowSize=21)
-
             fallback_triggered = False
             warning_msg = None
 
-            if hasattr(cv2, 'dnn_superresolution'):
-                if not check_and_download_sr_model():
-                    if sr_abort_flag:
-                        return
-                    print(">>> [系統動作] 下載失敗或超時，進入第二軌備援流程！")
-                    warning_msg = "⚠️ [資安警告] 網路連線超時或失敗，AI已自動平滑降級為第二軌高階銳化鑑識模態！"
-                    fallback_triggered = True
-                else:
-                    if sr_abort_flag:
-                        return
-                    try:
-                        sr = cv2.dnn_superresolution.DnnSuperResolutionImpl_create()
-                        sr.readModel(SR_MODEL_PATH)
-                        sr.setModel("espcn", 2)
-                        result = sr.upsample(img)
-                    except Exception as dnn_err:
-                        print(f">>> [系統警告] DNN 超解析執行失敗 ({dnn_err})，自動切換至第二軌備援流程！")
-                        warning_msg = "⚠️ [備援提示] AI 核心模組運算異常，已自動切換為第二軌高階銳化鑑識模態。"
-                        fallback_triggered = True
-            else:
+            if not check_and_download_sr_model():
+                if sr_abort_flag:
+                    return
+                print(">>> [系統動作] NCNN 下載失敗或超時，進入備援流程！")
+                warning_msg = "⚠️ [資安警告] 網路連線超時，AI已自動平滑降級為 OpenCV 備援鑑識模態！"
                 fallback_triggered = True
+            else:
+                if sr_abort_flag:
+                    return
+                try:
+                    # NCNN 運算
+                    print(f">>> [系統動作] 發動 NCNN 物理級 GPU 鑑識重建 ({mode} 模式)...")
+                    # 建立暫存圖
+                    temp_in = os.path.join(CONFIG.BASE_DIR, "temp_sr_in.png")
+                    temp_out = os.path.join(CONFIG.BASE_DIR, "temp_sr_out.png")
+                    cv2.imwrite(temp_in, img)
+                    
+                    # 選擇模型：車牌用 x4plus，人像用 x4plus-anime
+                    model_name = "realesrgan-x4plus-anime" if mode == 'face' else "realesrgan-x4plus"
+                    
+                    # 呼叫 subprocess
+                    cmd = [NCNN_EXE_PATH, "-i", temp_in, "-o", temp_out, "-n", model_name]
+                    CREATE_NO_WINDOW = 0x08000000
+                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=CREATE_NO_WINDOW)
+                    
+                    # 等待並允許中斷
+                    while process.poll() is None:
+                        if sr_abort_flag:
+                            process.terminate()
+                            print(">>> [系統動作] 鑑識重建已強制中止！")
+                            if os.path.exists(temp_in): os.remove(temp_in)
+                            if os.path.exists(temp_out): os.remove(temp_out)
+                            return
+                        time.sleep(0.1)
+                        
+                    if process.returncode == 0 and os.path.exists(temp_out):
+                        result = cv2.imread(temp_out)
+                    else:
+                        raise Exception(f"NCNN 引擎回傳錯誤代碼 {process.returncode}")
+                        
+                    # 清理暫存檔
+                    if os.path.exists(temp_in): os.remove(temp_in)
+                    if os.path.exists(temp_out): os.remove(temp_out)
+                    
+                except Exception as ncnn_err:
+                    print(f">>> [系統警告] NCNN 超解析執行失敗 ({ncnn_err})，自動切換至 OpenCV 備援流程！")
+                    warning_msg = "⚠️ [備援提示] AI 核心引擎異常，已自動切換為高階銳化備援模態。"
+                    fallback_triggered = True
 
             if fallback_triggered:
                 if sr_abort_flag:
                     return
                 print(">>> [系統動作] 發動第二軌備援：傳統最高階 Lanczos 內插法與 CLAHE 直方圖均衡化...")
                 h, w = img.shape[:2]
-                scaled = cv2.resize(img, (w * 2, h * 2), interpolation=cv2.INTER_LANCZOS4)
+                scaled = cv2.resize(img, (w * 4, h * 4), interpolation=cv2.INTER_LANCZOS4)
                 
                 ycrcb = cv2.cvtColor(scaled, cv2.COLOR_BGR2YCrCb)
                 clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
                 ycrcb[:,:,0] = clahe.apply(ycrcb[:,:,0])
                 result = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
-            
+
             if sr_abort_flag:
                 return
 
-            if mode == 'face':
-                print(">>> [系統動作] 發動人像五官模式後置處理：套用高階雙邊濾鏡 (Bilateral Filter) 進行平滑降噪...")
-                # 加大參數 d=15, 增強 sigma, 確保徹底抹除殘餘的馬賽克感但保留五官輪廓
+            if mode == 'face' and fallback_triggered:
+                print(">>> [系統動作] 備援人像五官模式後置處理：套用高階雙邊濾鏡 (Bilateral Filter)...")
                 result = cv2.bilateralFilter(result, d=15, sigmaColor=100, sigmaSpace=100)
 
             # 通訊封包瘦身：傳送給前端預覽時使用 90 壓縮率，大幅降低 WebSocket 負載
@@ -1316,7 +1368,6 @@ def run_ai_super_resolution(base64_str, mode='plate'):
             
         except Exception as e:
             print(f"❌ [數位鑑識崩潰]：超解析引擎運算錯誤 ({e})")
-            print("💡 [系統處置建議]：請確認 OpenCV dnn 模組支援，或嘗試重新選擇圖片。")
             eel.on_super_res_finished(None, f"❌ 運算發生錯誤：{e}")()
             
     Thread(target=_run_sr, daemon=True).start()
