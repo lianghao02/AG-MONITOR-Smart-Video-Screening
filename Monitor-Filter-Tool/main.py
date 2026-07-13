@@ -762,7 +762,17 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
 
                 try:
                     f = next(frame_iter)
-                    local_decoded_idx = int(float(f.pts * stream.time_base) * fps) if f.pts else local_decoded_idx + 1
+                    if local_decoded_idx == -1:
+                        # 剛完成 seek，必須依賴 PTS 來建立新的基準點
+                        if f.pts:
+                            local_decoded_idx = int(float(f.pts * stream.time_base) * fps)
+                        else:
+                            # 萬一連 seek 後都沒有 PTS，只能硬塞 target_idx 作為基準
+                            local_decoded_idx = target_idx if 'target_idx' in locals() else 0
+                    else:
+                        # 循序解碼中，嚴格加 1，無視壞掉的 PTS 避免跳躍或倒退
+                        local_decoded_idx += 1
+                        
                     bgr_frame = f.to_ndarray(format='bgr24')
                     
                     while decode_thread_running:
