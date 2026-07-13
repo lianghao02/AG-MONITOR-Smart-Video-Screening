@@ -1333,7 +1333,7 @@ def _flush_all_track_states(track_states, capture_mode, output_dir, prefix_name,
                 eel.appendLog(f"[{state['last_timecode']}] 擷取 ID:{tid} {state['class_name']}(Exit)", "success")
     track_states.clear()
 
-def save_legal_screenshot(frame, output_dir, time_code, objects_list, prefix_name="evidence"):
+def save_legal_screenshot(frame, output_dir, time_code, objects_list, prefix_name="evidence", target_info=None):
     dlog(f"[DEBUG-SAVE] save_legal_screenshot called: output_dir={output_dir}, time_code={time_code}")
     try:
         os.makedirs(output_dir, exist_ok=True)
@@ -1347,17 +1347,27 @@ def save_legal_screenshot(frame, output_dir, time_code, objects_list, prefix_nam
         new_w = int(frame.shape[1] * scale)
         new_h = int(frame.shape[0] * scale)
         frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+    else:
+        scale = 1.0
         
-        # We need to re-draw the bounding boxes if they were passed, but save_legal_screenshot currently
-        # receives the already-annotated frame (which means the boxes were drawn at low-res and then upscaled, 
-        # making them blurry or disproportionate). 
-        # To fix this without refactoring the whole pipeline, we just let it upscale. The issue the user reported 
-        # is actually that the OSD watermark text was drawn *after* upscaling (using fixed font sizes), 
-        # making the watermark look proportional to 1280px, but the YOLO boxes were drawn at 352px and upscaled, 
-        # so the YOLO boxes/text look HUGE and blurry compared to the crisp watermark.
-        # However, the user specifically said "timecode變小了，但是框車子的框框沒有跟著調整對不對". 
-        # Ah! They mean the watermark timecode is small (because it's drawn on 1280px), but the car bounding box 
-        # is huge/blurry (because it was drawn on 352px and scaled up)!
+    if target_info is not None:
+        x1, y1, x2, y2 = target_info['xyxy']
+        x1, y1, x2, y2 = int(x1 * scale), int(y1 * scale), int(x2 * scale), int(y2 * scale)
+        cls_id = target_info['cls_id']
+        tid = target_info['tid']
+        conf = target_info['conf']
+        
+        frame_w = frame.shape[1]
+        if frame_w < 1280:
+            thick, font_thick, font_scale = 1, 1, 0.4
+        elif frame_w < 2000:
+            thick, font_thick, font_scale = 2, 1, 0.6
+        else:
+            thick, font_thick, font_scale = 3, 2, 0.8
+            
+        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), thick)
+        cv2.putText(frame, f"ID:{tid} {CONFIG.TARGET_CLASSES[cls_id]} {conf:.2f}",
+            (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), font_thick)
 
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(frame_rgb)
