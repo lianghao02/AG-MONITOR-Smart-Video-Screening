@@ -716,8 +716,6 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         conf_thresh, class_vars = settings['confThresh'], settings['classes']
         capture_mode, fast_mode = settings.get('captureMode', ''), settings.get('fastMode', True)
         skip_sec = float(settings.get('skipSec', 0.20))
-        # 防呆機制：若影片幀率極低 (例如 2fps)，0.2s * 2fps = 0.4 幀，轉成整數會變 0，導致時間軸永遠卡死！
-        # 強制最低保底至少前進 1 個影格 (Frame)
         static_skip_step = max(1, int(fps * skip_sec))
         
         track_states, id_alias_map = {}, {}
@@ -1096,6 +1094,9 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             
                             # 前端除錯提示：讓使用者確認 Timecode 是否有在穩定前進，沒有卡死
                             eel.appendLog(f"[{time_code_str}] ⏩ 空景閃現推進中... (設定間距: {skip_sec}s)", "info")
+                            
+                            # Backend debug
+                            print(f"[DEBUG-STUCK] target_frame_idx={target_frame_idx}, static_skip_step={static_skip_step}, fps={fps}, last_received_idx={last_received_idx}, time_code_str={time_code_str}")
                         continue
                 else:
                     if not motion_detected and target_frame_idx >= dynamic_lock_until:
