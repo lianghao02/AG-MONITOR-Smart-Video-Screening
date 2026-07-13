@@ -890,7 +890,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                 conf_thresh = global_live_settings.get('confThresh', conf_thresh)
                 fast_mode = global_live_settings.get('fastMode', fast_mode)
                 skip_sec = float(global_live_settings.get('skipSec', skip_sec))
-                static_skip_step = int(fps * skip_sec)
+                static_skip_step = max(1, int(fps * skip_sec))
                 
                 # 依據動態狀態切換解碼模式
                 if not is_dynamic_mode:
@@ -1095,8 +1095,9 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             # 前端除錯提示：讓使用者確認 Timecode 是否有在穩定前進，沒有卡死
                             eel.appendLog(f"[{time_code_str}] ⏩ 空景閃現推進中... (設定間距: {skip_sec}s)", "info")
                             
-                            # Backend debug
-                            print(f"[DEBUG-STUCK] target_frame_idx={target_frame_idx}, static_skip_step={static_skip_step}, fps={fps}, last_received_idx={last_received_idx}, time_code_str={time_code_str}")
+                            # Backend debug (now pushed to UI for the user to see)
+                            debug_msg = f"[DEBUG] target={target_frame_idx}, skip={static_skip_step}, fps={fps}, last_idx={last_received_idx}"
+                            eel.appendLog(debug_msg, "warn")()
                         continue
                 else:
                     if not motion_detected and target_frame_idx >= dynamic_lock_until:
