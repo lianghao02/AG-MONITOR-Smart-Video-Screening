@@ -1010,14 +1010,20 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                                     break
                                 
                 final_targets = []
+                frame_w = frame.shape[1]
+                # 若為低解析度(如 352px)，設定較小的粗細與字體大小，以便後續放大 1280px 時比例正常
+                base_scale = frame_w / 1280.0
+                thick = max(1, int(2 * base_scale))
+                font_scale = max(0.3, 0.5 * base_scale)
+                
                 for i, t in enumerate(valid_targets):
                     if i not in drop_indices:
                         final_targets.append(t)
                         x1, y1, x2, y2 = t['xyxy']
                         cls_id, tid, conf = t['cls_id'], t['tid'], t['conf']
-                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), 1)
+                        cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), (0, 0, 255), thick)
                         cv2.putText(annotated_frame, f"ID:{tid} {CONFIG.TARGET_CLASSES[cls_id]} {conf:.2f}",
-                            (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 1)
+                            (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), thick)
                 
                 valid_targets = final_targets
 
@@ -1328,6 +1334,17 @@ def save_legal_screenshot(frame, output_dir, time_code, objects_list, prefix_nam
         new_w = int(frame.shape[1] * scale)
         new_h = int(frame.shape[0] * scale)
         frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+        
+        # We need to re-draw the bounding boxes if they were passed, but save_legal_screenshot currently
+        # receives the already-annotated frame (which means the boxes were drawn at low-res and then upscaled, 
+        # making them blurry or disproportionate). 
+        # To fix this without refactoring the whole pipeline, we just let it upscale. The issue the user reported 
+        # is actually that the OSD watermark text was drawn *after* upscaling (using fixed font sizes), 
+        # making the watermark look proportional to 1280px, but the YOLO boxes were drawn at 352px and upscaled, 
+        # so the YOLO boxes/text look HUGE and blurry compared to the crisp watermark.
+        # However, the user specifically said "timecode變小了，但是框車子的框框沒有跟著調整對不對". 
+        # Ah! They mean the watermark timecode is small (because it's drawn on 1280px), but the car bounding box 
+        # is huge/blurry (because it was drawn on 352px and scaled up)!
 
     frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
     pil_img = Image.fromarray(frame_rgb)
