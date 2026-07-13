@@ -612,29 +612,79 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         raw_skip_counter = 0       # 用來控制 Raw 流靜態模式的 YOLO 執行頻率
         last_progress_update = 0   # 上次更新進度條的時間
 
-        def get_frame(target_idx):
-            nonlocal current_av_frame, decoded_frame_idx, frame_iter
-            if target_idx < decoded_frame_idx or (target_idx - decoded_frame_idx) > 30:
-                pts = int(target_idx / fps / float(stream.time_base))
+        import queue
+        frame_queue = queue.Queue(maxsize=15)
+        command_queue = queue.Queue()
+        decode_thread_running = True
+
+        def decoding_worker():
+            nonlocal container, stream
+            frame_iter = container.decode(stream)
+            local_decoded_idx = -1
+            
+            while decode_thread_running:
                 try:
-                    container.seek(pts, stream=stream, backward=True)
-                    frame_iter = container.decode(stream)
-                    for f in frame_iter:
-                        current_av_frame = f
-                        decoded_frame_idx = int(float(f.pts * stream.time_base) * fps) if f.pts else decoded_frame_idx + 1
-                        if decoded_frame_idx >= target_idx: return f.to_ndarray(format='bgr24')
-                    return None
-                except Exception as e:
-                    if target_idx < decoded_frame_idx:
-                        return current_av_frame.to_ndarray(format='bgr24') if current_av_frame else None
-                    # For forward skipping, fall through to sequential decoding
+                    cmd = command_queue.get_nowait()
+                    if cmd['action'] == 'seek':
+                        target_idx = cmd['target']
+                        pts = int(target_idx / fps / float(stream.time_base))
+                        try:
+                            container.seek(pts, stream=stream, backward=True)
+                            frame_iter = container.decode(stream)
+                            local_decoded_idx = -1
+                        except Exception:
+                            pass
+                        # Flush existing queue items
+                        while not frame_queue.empty():
+                            try:
+                                frame_queue.get_nowait()
+                            except queue.Empty:
+                                break
+                except queue.Empty:
+                    pass
+
+                try:
+                    f = next(frame_iter)
+                    local_decoded_idx = int(float(f.pts * stream.time_base) * fps) if f.pts else local_decoded_idx + 1
+                    bgr_frame = f.to_ndarray(format='bgr24')
                     
-            while current_av_frame is None or decoded_frame_idx < target_idx:
+                    while decode_thread_running:
+                        try:
+                            frame_queue.put({'idx': local_decoded_idx, 'frame': bgr_frame}, timeout=0.05)
+                            break
+                        except queue.Full:
+                            continue
+                except StopIteration:
+                    frame_queue.put({'idx': -1, 'frame': None})
+                    break
+                except Exception as e:
+                    time.sleep(0.01)
+
+        decoding_thread = threading.Thread(target=decoding_worker, daemon=True)
+        decoding_thread.start()
+
+        last_received_idx = -1
+
+        def get_frame(target_idx):
+            nonlocal last_received_idx
+            
+            # 若倒退或是跳躍過大，發送 seek 指令
+            if target_idx < last_received_idx or (target_idx - last_received_idx) > 30:
+                command_queue.put({'action': 'seek', 'target': target_idx})
+                
+            while decode_thread_running:
                 try:
-                    current_av_frame = next(frame_iter)
-                    decoded_frame_idx = int(float(current_av_frame.pts * stream.time_base) * fps) if current_av_frame.pts else decoded_frame_idx + 1
-                except StopIteration: return None
-            return current_av_frame.to_ndarray(format='bgr24') if current_av_frame else None
+                    item = frame_queue.get(timeout=0.1)
+                    if item['idx'] == -1:
+                        return None
+                    last_received_idx = item['idx']
+                    if last_received_idx >= target_idx:
+                        return item['frame']
+                except queue.Empty:
+                    if not decode_thread_running:
+                        return None
+                    continue
+            return None
 
         last_ui_update, last_pushed_idx = time.time(), -1
         
@@ -874,15 +924,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             target_frame_idx = old_target
                             dlog(f"[DEBUG-SKIP] Raw stream: skipping seek, staying at frame {target_frame_idx}")
                         else:
-                            stream.codec_context.skip_frame = 'DEFAULT'
-                            pts = int(target_frame_idx / fps / float(stream.time_base))
-                            try:
-                                container.seek(pts, stream=stream, backward=True)
-                                frame_iter = container.decode(stream)
-                                decoded_frame_idx = -1
-                                current_av_frame = None
-                            except Exception:
-                                target_frame_idx = old_target
+                            command_queue.put({'action': 'seek', 'target': target_frame_idx})
                         continue
                     else:
                         _run_grace_period_gc(milliseconds, track_states, capture_mode, output_dir, clean_v_name)
@@ -1103,9 +1145,10 @@ def push_frame_to_ui(frame, valid_targets=[], roi_poly=None, time_code_str=""):
     roi_pts = []
     if roi_poly is not None:
         for pt in roi_poly:
+            flat_pt = pt.flatten() if hasattr(pt, 'flatten') else np.array(pt).flatten()
             roi_pts.append({
-                'x': float(pt[0][0] * scale + pad_x),
-                'y': float(pt[0][1] * scale + pad_y)
+                'x': float(flat_pt[0] * scale + pad_x),
+                'y': float(flat_pt[1] * scale + pad_y)
             })
 
     eel.setPreviewImage(b64_str, info_obj, json_boxes, roi_pts, time_code_str)()
