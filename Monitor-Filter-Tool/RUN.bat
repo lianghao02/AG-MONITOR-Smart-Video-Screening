@@ -28,7 +28,7 @@ if %errorlevel% equ 0 (
     echo -------------------------------------------------------
     echo [OK] Core Engine Ready! Launching AG-MONITOR...
     echo.
-    python main.py
+    python -B -u main.py
     pause
     exit /b
 )
@@ -39,7 +39,7 @@ if exist ".\python-embed\python.exe" (
     echo [OK] Portable core detected, starting [Portable Mode]...
     echo [OK] Booting up tactical room...
     echo -------------------------------------------------------
-    .\python-embed\python.exe main.py
+    .\python-embed\python.exe -B -u main.py
     pause
     exit /b
 )
