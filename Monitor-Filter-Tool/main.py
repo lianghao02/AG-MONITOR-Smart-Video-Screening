@@ -1057,7 +1057,9 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             target_frame_idx = old_target
                             dlog(f"[DEBUG-SKIP] Raw stream: skipping seek, staying at frame {target_frame_idx}")
                         else:
-                            command_queue.put({'action': 'seek', 'target': target_frame_idx})
+                            # 依賴 get_frame 內部的 `if target_idx < last_received_idx:` 自動觸發唯一一次的 seek，
+                            # 這裡不要重複 put seek，否則會產生多個過期的 seek command 造成時序錯亂回彈。
+                            pass
                         continue
                     else:
                         _run_grace_period_gc(milliseconds, track_states, capture_mode, output_dir, clean_v_name)
