@@ -570,8 +570,8 @@ def batch_processing_worker(settings):
             
             if p.exitcode != 0:
                 write_report(f"❌ 發生致命崩潰錯誤 (看門狗已介入)\n")
-                
-            write_report(f"✅ 完成分析影片: {v_name}\n")
+            else:
+                write_report(f"✅ 完成分析影片: {v_name}\n")
             gc.collect()
             
             # Check if user requested to skip to a specific video during this process
@@ -839,8 +839,10 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         last_ui_update, last_pushed_idx = time.time(), -1
         
         while True:
-            if stop_requested or skip_video_path is not None or deadlock_detected:
+            if stop_requested or skip_video_path is not None:
                 break
+            if deadlock_detected:
+                raise RuntimeError("Watchdog triggered deadlock interruption")
             
             with player_lock:
                 req_seek = player_state['seek_req']
@@ -1274,6 +1276,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         eel.appendLog(f"[{video_name}] 解碼毀損診斷: {str(e)}", "error")
         eel.appendLog("處置建議: 可能是編碼異常或檔案殘缺，請重新提取原始檔案。", "warn")
         print(f"Exception for {video_name}:\n{err_msg}")
+        raise
     finally:
         if container:
             try:
