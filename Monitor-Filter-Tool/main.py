@@ -831,9 +831,14 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     if last_received_idx >= target_idx:
                         return item['frame']
                 except queue.Empty:
-                    if not decode_thread_running or deadlock_detected:
+                    if deadlock_detected:
+                        raise RuntimeError("Watchdog triggered deadlock interruption")
+                    if not decode_thread_running:
                         return None
                     continue
+            
+            if deadlock_detected:
+                raise RuntimeError("Watchdog triggered deadlock interruption")
             return None
 
         last_ui_update, last_pushed_idx = time.time(), -1
