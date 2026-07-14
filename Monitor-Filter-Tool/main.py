@@ -733,13 +733,37 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         frame_queue = queue.Queue(maxsize=15)
         command_queue = queue.Queue()
         decode_thread_running = True
+        deadlock_detected = False
+        last_decoder_heartbeat = time.time()
+        
+        def watchdog_worker():
+            nonlocal deadlock_detected
+            while decode_thread_running:
+                time.sleep(1)
+                if time.time() - last_decoder_heartbeat > 5.0:
+                    deadlock_detected = True
+                    dlog("[WATCHDOG] 🚨 偵測到解碼執行緒卡死 (Deadlock)！觸發強制中斷！")
+                    with open("系統鑑識紀錄.txt", "a", encoding="utf-8") as f:
+                        f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🚨 影片讀取失敗 (壞軌或死鎖): {v_name}\n")
+                    eel.appendLog(f"🚨 {clean_v_name} 發生壞軌死鎖，看門狗已強制中斷", "danger")
+                    break
+
+        watchdog_thread = threading.Thread(target=watchdog_worker, daemon=True)
+        watchdog_thread.start()
 
         def decoding_worker():
-            nonlocal container, stream
+            nonlocal container, stream, last_decoder_heartbeat
             frame_iter = container.decode(stream)
             local_decoded_idx = -1
             
             while decode_thread_running:
+                last_decoder_heartbeat = time.time()
+                
+                # 混沌測試 (Chaos Monkey)
+                if os.path.exists("sim_crash.txt") and local_decoded_idx == 30:
+                    dlog("[CHAOS MONKEY] 🐒 觸發混沌測試！故意睡眠 10 秒製造死鎖...")
+                    time.sleep(10)
+
                 try:
                     cmd = command_queue.get_nowait()
                     if cmd['action'] == 'seek':
@@ -799,7 +823,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
             if target_idx < last_received_idx or (target_idx - last_received_idx) > 30:
                 command_queue.put({'action': 'seek', 'target': target_idx})
                 
-            while decode_thread_running:
+            while decode_thread_running and not deadlock_detected:
                 try:
                     item = frame_queue.get(timeout=0.1)
                     if item['idx'] == -1:
@@ -808,7 +832,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     if last_received_idx >= target_idx:
                         return item['frame']
                 except queue.Empty:
-                    if not decode_thread_running:
+                    if not decode_thread_running or deadlock_detected:
                         return None
                     continue
             return None
@@ -816,7 +840,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         last_ui_update, last_pushed_idx = time.time(), -1
         
         while True:
-            if stop_requested or skip_video_path is not None:
+            if stop_requested or skip_video_path is not None or deadlock_detected:
                 break
             
             with player_lock:
