@@ -743,8 +743,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                 if time.time() - last_decoder_heartbeat > 5.0:
                     deadlock_detected = True
                     dlog("[WATCHDOG] 🚨 偵測到解碼執行緒卡死 (Deadlock)！觸發強制中斷！")
-                    with open("系統鑑識紀錄.txt", "a", encoding="utf-8") as f:
-                        f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 🚨 影片讀取失敗 (壞軌或死鎖): {video_name}\n")
+                    write_report(f"🚨 影片讀取失敗 (壞軌或死鎖): {video_name}")
                     eel.appendLog(f"🚨 {clean_v_name} 發生壞軌死鎖，看門狗已強制中斷", "danger")
                     break
 
