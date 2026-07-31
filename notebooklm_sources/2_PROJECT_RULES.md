@@ -1,7 +1,7 @@
 # Monitor-Filter-Tool 專案領域知識與開發規範
 
 > [!IMPORTANT]
-> **本專案受 全域開發憲法 v5.0 最高規範約束**
+> **本專案受 全域開發憲法 v7.0 終極大一統版 最高規範約束**
 > 1. **預設啟用**：現代化 UI/UX 審美底線、驗證先行 (Verification First)。
 > 2. **進階調度**：支援 NotebookLM 條件觸發與 Subagent (子代理) 背景分工機制。
 > ---
