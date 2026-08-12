@@ -1,0 +1,15 @@
+# AG-MONITOR 固定鏡頭 BoT-SORT ReID 實驗設定
+tracker_type: botsort
+track_high_thresh: 0.25
+track_low_thresh: 0.10
+new_track_thresh: 0.25
+track_buffer: 90
+match_thresh: 0.80
+fuse_score: True
+
+# 本專案輸入為固定監視器，停用相機運動補償以降低額外成本。
+gmc_method: none
+proximity_thresh: 0.50
+appearance_thresh: 0.85
+with_reid: True
+model: auto

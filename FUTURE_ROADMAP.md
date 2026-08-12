@@ -21,12 +21,16 @@
   - AI 不僅記錄車輛軌跡，還會記錄車輛的「顏色、形狀特徵向量 (Feature Vector)」。
   - **預期效益**：大幅降低 ID Switch (目標切換) 的機率，即使車輛被大型障礙物遮蔽後再出現，依然能被系統精準認出並維持同一個追蹤 ID。
 
+**2026/08/12 P3-1 進度**：已加入白名單式 BoT-SORT ReID 實驗選項，採 YOLO 原生外觀特徵且保留 ByteTrack 為預設。CH09 實體片段雙輪代理基準顯示短軌跡與相鄰幀 ID 變更均略降；尚待人工標註遮蔽案例驗證，暫不升級為預設。
+
 ---
 ✅ **[已完成] 效能架構：多執行緒非同步管線 (Async Pipeline) (v2.0)**
 *已於 v2.0 版本成功實作，導入 `queue.Queue` 與專屬解碼執行緒 (Decoding Thread)，讓 PyAV 解碼與 YOLO 推論完全非同步並行，徹底解放 CPU/GPU 算力。*
 
 ✅ **[已完成] 數位鑑識修復：引進業界頂流 SR 模型 (v1.1)**
 *已於 v1.1 版本成功實作，整合騰訊 Real-ESRGAN 的可攜式 NCNN Vulkan 引擎，達成零 Python 依賴的極限物理級 GPU 重建。*
+
+*2026/08/12 實機複驗：官方 Windows ZIP 與執行檔 SHA-256 驗證通過，Intel UHD Graphics 630 使用 `realesrgan-x4plus` 與 `realesrgan-x4plus-anime` 均成功產生 4 倍輸出。*
 
 ---
 *文件建立日期：2026/07/13*

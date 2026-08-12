@@ -51,6 +51,7 @@ def _spawn_auto_video(video_path, output_dir, ui_queue, shared_state, report_pat
 
     settings = {
         "aiModel": "yolov8n.pt",
+        "trackerMode": "botsort_reid",
         "confThresh": 0.40,
         "captureMode": "雙格蒐證模式 (起點+最清晰)",
         "classes": {"0": True, "1": True, "2": True, "3": True, "5": True, "7": True},

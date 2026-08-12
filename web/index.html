@@ -436,6 +436,11 @@
                     <option value="yolov8n.pt" selected>🏎️ 極速先鋒引擎 (Nano - 速度最快)</option>
                     <option value="yolov8s.pt">🦅 鷹眼精準引擎 (Small - 遠距/模糊特化)</option>
                 </select>
+                <label style="font-size:14px; margin:10px 0 5px; display:block;">目標追蹤核心:</label>
+                <select id="trackerMode" class="cyber-select">
+                    <option value="bytetrack" selected>ByteTrack（穩定基準）</option>
+                    <option value="botsort_reid">BoT-SORT ReID（實驗性／遮蔽場景）</option>
+                </select>
             </div>
 
             <div class="slider-group">
@@ -834,12 +839,14 @@
                 btn.innerHTML = currentMode === 'auto' ? "▶️ 啟動全自動 AI 過濾" : "▶️ 載入戰術播放引擎";
                 btn.className = "btn btn-start";
                 document.getElementById("aiModel").disabled = false;
+                document.getElementById("trackerMode").disabled = false;
                 eel.request_stop()();
                 return;
             }
             
             let settings = {
                 aiModel: document.getElementById("aiModel").value,
+                trackerMode: document.getElementById("trackerMode").value,
                 confThresh: parseFloat(confSlider.value),
                 captureMode: document.getElementById("captureMode").value,
                 classes: {
@@ -859,6 +866,7 @@
             btn.innerHTML = currentMode === 'auto' ? "⏹️ 停止全自動分析" : "⏹️ 關閉播放引擎";
             btn.className = "btn btn-stop";
             document.getElementById("aiModel").disabled = true;
+            document.getElementById("trackerMode").disabled = true;
             isProcessing = true;
             
             document.getElementById("logBox").innerHTML = "";
@@ -915,6 +923,7 @@
             btn.innerHTML = currentMode === 'auto' ? "▶️ 啟動全自動 AI 過濾" : "▶️ 載入戰術播放引擎";
             btn.className = "btn btn-start";
             document.getElementById("aiModel").disabled = false;
+            document.getElementById("trackerMode").disabled = false;
             document.getElementById("progressText").textContent = "0%";
             document.getElementById("timeline").value = 0;
             appendLog(">>> 任務結束或已手動中止", "info");

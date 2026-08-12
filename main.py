@@ -14,13 +14,18 @@ import cv2
 import numpy as np
 import time
 import base64
+import csv
 import hashlib
+import json
 import math
 import re
+import shutil
 import urllib.request
 import zipfile
 import subprocess
+import tempfile
 from datetime import datetime, timedelta
+from pathlib import Path
 import threading
 from threading import Thread
 from PIL import Image, ImageDraw, ImageFont
@@ -64,6 +69,19 @@ class CONFIG:
     MOTION_THRESH = 25     
     MOTION_MIN_AREA = 500  
     HASH_CHUNK_SIZE = 4 * 1024 * 1024
+    DECODER_SLOW_WARN_SEC = 10.0
+    DECODER_DEADLOCK_SEC = 30.0
+    DECODER_MAX_CONSECUTIVE_ERRORS = 100
+    BYTETRACK_OCCLUSION_GRACE_SEC = 1.5
+    BOTSORT_REID_OCCLUSION_GRACE_SEC = 6.0
+    TRACKER_CONFIGS = {
+        "bytetrack": os.path.join(BASE_DIR, "trackers", "ag_bytetrack.yaml"),
+        "botsort_reid": os.path.join(BASE_DIR, "trackers", "ag_botsort_reid.yaml"),
+    }
+    TRACKER_LABELS = {
+        "bytetrack": "ByteTrack（穩定基準）",
+        "botsort_reid": "BoT-SORT ReID（實驗性）",
+    }
 
     TARGET_CLASSES = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
 
@@ -121,6 +139,24 @@ def format_enabled_classes(class_settings):
     return ", ".join(enabled) if enabled else "無"
 
 
+def resolve_tracker_config(settings):
+    """只允許使用專案內固定追蹤設定，拒絕任意路徑注入。"""
+    tracker_mode = settings.get("trackerMode", "bytetrack")
+    if tracker_mode not in CONFIG.TRACKER_CONFIGS:
+        raise ValueError(f"不支援的追蹤核心: {tracker_mode}")
+    tracker_path = CONFIG.TRACKER_CONFIGS[tracker_mode]
+    if not os.path.isfile(tracker_path):
+        raise FileNotFoundError(f"追蹤設定不存在: {tracker_path}")
+    return tracker_mode, tracker_path
+
+
+def tracker_occlusion_grace_seconds(tracker_mode):
+    """ReID 必須維持足夠長的連續追蹤，才能跨越三秒以上遮蔽。"""
+    if tracker_mode == "botsort_reid":
+        return CONFIG.BOTSORT_REID_OCCLUSION_GRACE_SEC
+    return CONFIG.BYTETRACK_OCCLUSION_GRACE_SEC
+
+
 def resolve_live_processing_settings(live_settings, current_settings):
     """合併分析中的即時設定；未變更欄位沿用目前值。"""
     resolved = current_settings.copy()
@@ -129,6 +165,11 @@ def resolve_live_processing_settings(live_settings, current_settings):
             resolved[key] = live_settings[key]
     resolved["skipSec"] = float(resolved["skipSec"])
     return resolved
+
+
+def should_trigger_decoder_deadlock(phase, elapsed, timeout=CONFIG.DECODER_DEADLOCK_SEC):
+    """只有解碼器本身長時間無回應才視為死鎖；等待佇列消費不算。"""
+    return phase == "decoding" and elapsed >= timeout
 
 
 # Player State
@@ -290,86 +331,161 @@ def open_capture_folder():
     except Exception as e:
         eel.appendLog(f"開啟資料夾失敗: {str(e)}", "error")
 
+
+def _build_rename_target(path, keep_old_name):
+    dir_name = os.path.dirname(path)
+    base_name = os.path.basename(path)
+    if base_name.endswith("]"):
+        name_no_ext, broken_ext = os.path.splitext(base_name)
+        if broken_ext.startswith(".") and broken_ext.endswith("]"):
+            return os.path.join(dir_name, name_no_ext + "]" + broken_ext[:-1])
+    start_time = parse_start_time(base_name)
+    if not start_time:
+        return path
+    time_str = start_time.strftime("%Y%m%d_%H%M%S")
+    if keep_old_name and base_name.startswith(f"{time_str}_["):
+        return path
+    if not keep_old_name and base_name.startswith(time_str) and "_[" not in base_name:
+        return path
+    name_no_ext, ext = os.path.splitext(base_name)
+    if keep_old_name:
+        if re.match(r'^20\d{6}_\d{6}_\[', name_no_ext) and name_no_ext.endswith("]"):
+            name_no_ext = name_no_ext[17:-1]
+        new_name = f"{time_str}_[{name_no_ext}]{ext}"
+    else:
+        new_name = f"{time_str}{ext}"
+    return os.path.join(dir_name, new_name)
+
+
+def _reserve_unique_rename_path(candidate, source, reserved_paths):
+    source_key = os.path.normcase(os.path.abspath(source))
+    stem, ext = os.path.splitext(candidate)
+    counter = 0
+    while True:
+        current = candidate if counter == 0 else f"{stem}_{counter}{ext}"
+        current_key = os.path.normcase(os.path.abspath(current))
+        exists_elsewhere = os.path.exists(current) and current_key != source_key
+        if not exists_elsewhere and current_key not in reserved_paths:
+            reserved_paths.add(current_key)
+            return current
+        counter += 1
+
+
+def _write_rename_manifest(manifest, manifest_dir):
+    os.makedirs(manifest_dir, exist_ok=True)
+    if "manifest_path" not in manifest:
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        manifest["manifest_path"] = os.path.join(manifest_dir, f"rename_{stamp}.json")
+        manifest["csv_path"] = os.path.join(manifest_dir, f"rename_{stamp}.csv")
+    json_temp = manifest["manifest_path"] + ".tmp"
+    with open(json_temp, "w", encoding="utf-8", newline="\n") as file_obj:
+        json.dump(manifest, file_obj, ensure_ascii=False, indent=2)
+    os.replace(json_temp, manifest["manifest_path"])
+    csv_temp = manifest["csv_path"] + ".tmp"
+    fields = ("status", "original_path", "new_path", "size", "sha256_before", "sha256_after", "error")
+    with open(csv_temp, "w", encoding="utf-8-sig", newline="") as file_obj:
+        writer = csv.DictWriter(file_obj, fieldnames=fields, extrasaction="ignore")
+        writer.writeheader()
+        writer.writerows(manifest["items"])
+    os.replace(csv_temp, manifest["csv_path"])
+
+
+def plan_video_renames(paths, keep_old_name=True):
+    reserved_paths = set()
+    items = []
+    for raw_path in paths:
+        source = os.path.abspath(raw_path)
+        if not os.path.isfile(source):
+            raise FileNotFoundError(f"找不到待重新命名檔案: {source}")
+        candidate = _build_rename_target(source, keep_old_name)
+        if os.path.normcase(candidate) == os.path.normcase(source):
+            reserved_paths.add(os.path.normcase(source))
+            items.append({"status": "skipped", "original_path": source, "new_path": source,
+                          "size": os.path.getsize(source), "sha256_before": "", "sha256_after": "",
+                          "error": "檔名已符合格式或無法解析時間"})
+            continue
+        destination = _reserve_unique_rename_path(candidate, source, reserved_paths)
+        metadata = build_evidence_metadata(source)
+        items.append({"status": "planned", "original_path": source, "new_path": destination,
+                      "size": metadata["size"], "sha256_before": metadata["sha256"],
+                      "sha256_after": "", "error": ""})
+    return items
+
+
+def execute_rename_transaction(paths, keep_old_name=True, manifest_dir=None, rename_func=None, progress_callback=None):
+    rename_func = rename_func or os.rename
+    manifest_dir = manifest_dir or os.path.join(CONFIG.CAPTURES_DIR, "rename_manifests")
+    manifest = {"version": 1, "created_at": datetime.now().astimezone().isoformat(timespec="seconds"),
+                "keep_old_name": bool(keep_old_name), "status": "planning", "items": []}
+    try:
+        manifest["items"] = plan_video_renames(paths, keep_old_name)
+        manifest["status"] = "planned"
+        _write_rename_manifest(manifest, manifest_dir)
+    except Exception as error:
+        manifest["status"], manifest["error"] = "planning_failed", str(error)
+        _write_rename_manifest(manifest, manifest_dir)
+        return {"success": False, "count": 0, "new_paths": list(paths), "msg": str(error),
+                "manifest_path": manifest["manifest_path"], "csv_path": manifest["csv_path"]}
+
+    completed = []
+    try:
+        actionable = [item for item in manifest["items"] if item["status"] == "planned"]
+        for index, item in enumerate(actionable, 1):
+            rename_func(item["original_path"], item["new_path"])
+            completed.append(item)
+            item["sha256_after"] = calculate_sha256(item["new_path"])
+            if item["sha256_after"] != item["sha256_before"]:
+                raise RuntimeError(f"重新命名後 SHA-256 不一致: {item['new_path']}")
+            item["status"] = "renamed"
+            _write_rename_manifest(manifest, manifest_dir)
+            if progress_callback:
+                progress_callback(index, len(actionable))
+    except Exception as error:
+        rollback_errors = []
+        for item in reversed(completed):
+            try:
+                if os.path.exists(item["original_path"]):
+                    raise FileExistsError(f"回復目的已存在: {item['original_path']}")
+                rename_func(item["new_path"], item["original_path"])
+                if calculate_sha256(item["original_path"]) != item["sha256_before"]:
+                    raise RuntimeError("回復後 SHA-256 不一致")
+                item["status"] = "rolled_back"
+            except Exception as rollback_error:
+                item["status"], item["error"] = "rollback_failed", str(rollback_error)
+                rollback_errors.append(str(rollback_error))
+        manifest["status"] = "rollback_failed" if rollback_errors else "rolled_back"
+        manifest["error"] = str(error)
+        _write_rename_manifest(manifest, manifest_dir)
+        message = f"重新命名失敗，已回復: {error}"
+        if rollback_errors:
+            message = f"重新命名與回復均失敗，請依對照表人工處理: {'; '.join(rollback_errors)}"
+        return {"success": False, "count": 0, "new_paths": list(paths), "msg": message,
+                "manifest_path": manifest["manifest_path"], "csv_path": manifest["csv_path"]}
+
+    manifest["status"] = "completed"
+    _write_rename_manifest(manifest, manifest_dir)
+    path_map = {item["original_path"]: item["new_path"] for item in manifest["items"]}
+    new_paths = [path_map.get(os.path.abspath(path), os.path.abspath(path)) for path in paths]
+    return {"success": True, "count": len(completed), "new_paths": new_paths,
+            "manifest_path": manifest["manifest_path"], "csv_path": manifest["csv_path"]}
+
+
 @eel.expose
 def batch_rename_videos(keep_old_name=True):
     global video_queue
     with list_lock:
         if is_processing:
             return {"success": False, "msg": "分析中無法重新命名"}
-        
-        new_queue = []
-        count = 0
         total = len(video_queue)
-        
-        for idx, path in enumerate(video_queue):
-            if idx % 50 == 0:
-                eel.updateRenameProgress(idx, total)()
-                eel.sleep(0.001) # let UI update
-                
-            dir_name = os.path.dirname(path)
-            base_name = os.path.basename(path)
-            
-            # Auto-repair logic for files with trapped extensions e.g. foo_[bar.mp4] -> foo_[bar].mp4
-            if base_name.endswith("]"):
-                name_no_ext, broken_ext = os.path.splitext(base_name)
-                if broken_ext.endswith("]"):
-                    real_ext = broken_ext[:-1] # remove ]
-                    repaired_name = name_no_ext + "]" + real_ext
-                    repaired_path = os.path.join(dir_name, repaired_name)
-                    try:
-                        os.rename(path, repaired_path)
-                        new_queue.append(repaired_path)
-                        count += 1
-                        continue
-                    except Exception:
-                        pass
-            
-            dt = parse_start_time(base_name)
-            if not dt:
-                new_queue.append(path)
-                continue
-                
-            time_str = dt.strftime("%Y%m%d_%H%M%S")
-            
-            # Check if it already matches target format to skip safely
-            if keep_old_name and base_name.startswith(f"{time_str}_["):
-                new_queue.append(path)
-                continue
-            if not keep_old_name and base_name.startswith(time_str) and "_[" not in base_name:
-                new_queue.append(path)
-                continue
-                
-            if keep_old_name:
-                name_no_ext, ext = os.path.splitext(base_name)
-                # Prevent nested brackets by removing previous timestamp prefix if it exists
-                if re.match(r'^20\d{6}_\d{6}_\[', name_no_ext) and name_no_ext.endswith("]"):
-                    name_no_ext = name_no_ext[17:-1]
-                new_name = f"{time_str}_[{name_no_ext}]{ext}"
-            else:
-                ext = os.path.splitext(base_name)[1]
-                new_name = f"{time_str}{ext}"
-                
-            new_path = os.path.join(dir_name, new_name)
-            
-            if not keep_old_name and os.path.exists(new_path) and new_path != path:
-                counter = 1
-                ext = os.path.splitext(base_name)[1]
-                while os.path.exists(new_path):
-                    new_name = f"{time_str}_{counter}{ext}"
-                    new_path = os.path.join(dir_name, new_name)
-                    counter += 1
-
-            try:
-                os.rename(path, new_path)
-                new_queue.append(new_path)
-                count += 1
-            except Exception as e:
-                print(f"Rename failed for {path}: {e}")
-                new_queue.append(path)
-                
+        result = execute_rename_transaction(
+            list(video_queue),
+            keep_old_name=keep_old_name,
+            progress_callback=lambda current, action_total: eel.updateRenameProgress(current, action_total)(),
+        )
         eel.updateRenameProgress(total, total)()
-        video_queue = new_queue
-        return {"success": True, "count": count, "new_paths": new_queue}
+        if result["success"]:
+            video_queue = result["new_paths"]
+        return result
 
 @eel.expose
 def set_roi_points(pts):
@@ -642,6 +758,10 @@ def batch_processing_worker(settings):
         write_report("=== AG-MONITOR 科技偵查戰術分析紀錄 ===")
         write_report(f"AI 核心模型: {model_name}")
         write_report(f"執行模式: {engine_mode}")
+        tracker_mode, tracker_config = resolve_tracker_config(settings)
+        write_report(f"追蹤核心: {CONFIG.TRACKER_LABELS[tracker_mode]}")
+        write_report(f"追蹤設定: {tracker_config}")
+        write_report(f"遮蔽追蹤保活: {tracker_occlusion_grace_seconds(tracker_mode)} 秒")
         write_report(f"信心門檻: {settings.get('confThresh', 0.40)}")
         write_report(f"啟用類別: {format_enabled_classes(settings.get('classes', {}))}")
         write_report(f"蒐證模式: {settings.get('captureMode', '')}")
@@ -785,6 +905,17 @@ def batch_processing_worker(settings):
         eel.processingFinished()
 
 def parse_start_time(filename):
+    # Channel export: CH07-20260326-173728-184505 (YYYYMMDD-Start-End)
+    match_channel_export = re.search(r'(?:^|[_-])CH\d+[_-](20\d{6})[_-](\d{6})[_-]\d{6}(?=\.|[_-]|$)', filename, re.IGNORECASE)
+    if match_channel_export:
+        try:
+            return datetime.strptime(
+                f"{match_channel_export.group(1)}_{match_channel_export.group(2)}",
+                "%Y%m%d_%H%M%S",
+            )
+        except ValueError:
+            pass
+
     # Dashcam/Special Format: P260625_015237_015747 (YYMMDD_StartTime_EndTime)
     match_yymmdd = re.search(r'[A-Za-z]?(\d{2})(\d{4})_(\d{6})_\d{6}', filename)
     if match_yymmdd:
@@ -860,6 +991,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         os.makedirs(output_dir, exist_ok=True)
     real_roi_poly = get_real_roi_polygon()
     start_time_dt = parse_start_time(video_name)
+    tracker_mode, tracker_config = resolve_tracker_config(settings)
 
     fh = None
     container = None
@@ -883,6 +1015,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         
         fps = float(stream.average_rate) if stream.average_rate else 30.0
         if fps <= 0: fps = 30.0
+        occlusion_grace_frames = max(1, int(fps * tracker_occlusion_grace_seconds(tracker_mode)))
         
         total_frames = stream.frames
         if total_frames <= 0:
@@ -917,30 +1050,46 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         command_queue = queue.Queue()
         decode_thread_running = True
         deadlock_detected = False
-        last_decoder_heartbeat = time.time()
+        decoder_health = {"phase": "idle", "since": time.monotonic(), "slow_warned": False}
+        decoder_health_lock = threading.Lock()
+
+        def set_decoder_phase(phase, made_progress=False):
+            with decoder_health_lock:
+                decoder_health["phase"] = phase
+                if made_progress or phase != "decoding":
+                    decoder_health["since"] = time.monotonic()
+                    decoder_health["slow_warned"] = False
         
         def watchdog_worker():
             nonlocal deadlock_detected
             while decode_thread_running:
                 time.sleep(1)
-                if time.time() - last_decoder_heartbeat > 5.0:
+                with decoder_health_lock:
+                    phase = decoder_health["phase"]
+                    elapsed = time.monotonic() - decoder_health["since"]
+                    slow_warned = decoder_health["slow_warned"]
+                if phase == "decoding" and elapsed >= CONFIG.DECODER_SLOW_WARN_SEC and not slow_warned:
+                    with decoder_health_lock:
+                        decoder_health["slow_warned"] = True
+                    dlog(f"[WATCHDOG] 解碼耗時偏長但尚未熔斷: {elapsed:.1f}s")
+                    write_report(f"⚠️ 解碼器回應偏慢: {video_name}，已等待 {elapsed:.1f} 秒")
+                if should_trigger_decoder_deadlock(phase, elapsed):
                     deadlock_detected = True
-                    dlog("[WATCHDOG] 🚨 偵測到解碼執行緒卡死 (Deadlock)！觸發強制中斷！")
-                    write_report(f"🚨 影片讀取失敗 (壞軌或死鎖): {video_name}")
-                    eel.appendLog(f"🚨 {clean_v_name} 發生壞軌死鎖，看門狗已強制中斷", "danger")
+                    dlog(f"[WATCHDOG] 🚨 解碼階段 {elapsed:.1f}s 無進展，觸發熔斷")
+                    write_report(f"🚨 影片讀取失敗 (解碼階段 {elapsed:.1f} 秒無進展): {video_name}")
+                    eel.appendLog(f"🚨 {clean_v_name} 解碼超過 {CONFIG.DECODER_DEADLOCK_SEC:.0f} 秒無回應，看門狗已熔斷", "danger")
                     break
 
         watchdog_thread = threading.Thread(target=watchdog_worker, daemon=True)
         watchdog_thread.start()
 
         def decoding_worker():
-            nonlocal container, stream, last_decoder_heartbeat
+            nonlocal container, stream
             frame_iter = container.decode(stream)
             local_decoded_idx = -1
+            consecutive_errors = 0
             
             while decode_thread_running:
-                last_decoder_heartbeat = time.time()
-                
                 # 混沌測試 (Chaos Monkey)
                 if os.path.exists("sim_crash.txt") and local_decoded_idx == 30:
                     dlog("[CHAOS MONKEY] 🐒 觸發混沌測試！故意睡眠 10 秒製造死鎖...")
@@ -967,7 +1116,10 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     pass
 
                 try:
+                    set_decoder_phase("decoding")
                     f = next(frame_iter)
+                    set_decoder_phase("decoded", made_progress=True)
+                    consecutive_errors = 0
                     if local_decoded_idx == -1:
                         # 剛完成 seek，必須依賴 PTS 來建立新的基準點
                         if f.pts:
@@ -983,14 +1135,23 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     
                     while decode_thread_running:
                         try:
+                            set_decoder_phase("queue_wait")
                             frame_queue.put({'idx': local_decoded_idx, 'frame': bgr_frame}, timeout=0.05)
+                            set_decoder_phase("idle", made_progress=True)
                             break
                         except queue.Full:
                             continue
                 except StopIteration:
+                    set_decoder_phase("finished", made_progress=True)
                     frame_queue.put({'idx': -1, 'frame': None})
                     break
                 except Exception as e:
+                    set_decoder_phase("decode_error", made_progress=True)
+                    consecutive_errors += 1
+                    if consecutive_errors >= CONFIG.DECODER_MAX_CONSECUTIVE_ERRORS:
+                        dlog(f"[DECODER] 連續解碼錯誤達上限: {e}")
+                        frame_queue.put({'idx': -2, 'frame': None, 'error': str(e)})
+                        break
                     time.sleep(0.01)
 
         decoding_thread = threading.Thread(target=decoding_worker, daemon=True)
@@ -1010,6 +1171,8 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     item = frame_queue.get(timeout=0.1)
                     if item['idx'] == -1:
                         return None
+                    if item['idx'] == -2:
+                        raise RuntimeError(f"解碼器連續錯誤達安全上限: {item.get('error', 'unknown')}")
                     last_received_idx = item['idx']
                     if last_received_idx >= target_idx:
                         return item['frame']
@@ -1165,7 +1328,13 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
 
                 # ---------------- YOLO Detection ----------------
                 if is_dynamic_mode:
-                    results = model.track(frame, persist=True, tracker="bytetrack.yaml", verbose=False, conf=conf_thresh)[0]
+                    results = model.track(
+                        frame,
+                        persist=True,
+                        tracker=tracker_config,
+                        verbose=False,
+                        conf=conf_thresh,
+                    )[0]
                 else:
                     results = model.predict(frame, verbose=False, conf=conf_thresh)[0]
                     
@@ -1249,7 +1418,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     no_target_frames += 1
 
                 if is_dynamic_mode:
-                    if no_target_frames < int(fps * 1.5):
+                    if no_target_frames < occlusion_grace_frames:
                         motion_detected = True
 
                 if is_dynamic_mode and target_frame_idx < dynamic_lock_until:
@@ -1465,6 +1634,8 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
 
         if engine_mode == 'auto':
             _flush_all_track_states(track_states, capture_mode, output_dir, clean_v_name, filter_stationary)
+        decode_thread_running = False
+        set_decoder_phase("stopped", made_progress=True)
         container.close()
 
     except Exception as e:
@@ -1475,6 +1646,8 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         print(f"Exception for {video_name}:\n{err_msg}")
         raise
     finally:
+        if 'decode_thread_running' in locals():
+            decode_thread_running = False
         if container:
             try:
                 container.close()
@@ -1676,36 +1849,114 @@ NCNN_MODEL_DIR = os.path.join(CONFIG.BASE_DIR, 'models', 'realesrgan')
 NCNN_EXE_PATH = os.path.join(NCNN_MODEL_DIR, 'realesrgan-ncnn-vulkan.exe')
 NCNN_DOWNLOAD_URL = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip'
 NCNN_ZIP_PATH = os.path.join(CONFIG.BASE_DIR, 'realesrgan-windows.zip')
+NCNN_ZIP_SHA256 = 'ABC02804E17982A3BE33675E4D471E91EA374E65B70167ABC09E31ACB412802D'
+NCNN_EXE_SHA256 = '07E49F7CBB4EDE01AE4DD4C399D3A7E5846E3D2085C3128EFF881E55CB7B1A0C'
+NCNN_REQUIRED_FILES = (
+    'realesrgan-ncnn-vulkan.exe',
+    'models/realesrgan-x4plus.bin',
+    'models/realesrgan-x4plus.param',
+    'models/realesrgan-x4plus-anime.bin',
+    'models/realesrgan-x4plus-anime.param',
+)
 
 sr_abort_flag = False
 
+
+def validate_sr_engine(engine_dir=NCNN_MODEL_DIR, expected_exe_sha256=NCNN_EXE_SHA256):
+    if not all(os.path.isfile(os.path.join(engine_dir, relative_path)) for relative_path in NCNN_REQUIRED_FILES):
+        return False
+    if expected_exe_sha256:
+        return calculate_sha256(os.path.join(engine_dir, 'realesrgan-ncnn-vulkan.exe')) == expected_exe_sha256.upper()
+    return True
+
+
+def _validate_safe_zip(zip_ref):
+    for member in zip_ref.infolist():
+        member_path = member.filename.replace('\\', '/')
+        path_parts = [part for part in member_path.split('/') if part]
+        if member_path.startswith('/') or re.match(r'^[A-Za-z]:', member_path) or '..' in path_parts:
+            raise ValueError(f"ZIP 含不安全路徑: {member.filename}")
+        unix_mode = member.external_attr >> 16
+        if (unix_mode & 0o170000) == 0o120000:
+            raise ValueError(f"ZIP 不允許符號連結: {member.filename}")
+
+
+def install_sr_engine_from_zip(
+    zip_path,
+    engine_dir=NCNN_MODEL_DIR,
+    expected_sha256=NCNN_ZIP_SHA256,
+    expected_exe_sha256=NCNN_EXE_SHA256,
+):
+    actual_sha256 = calculate_sha256(zip_path)
+    if expected_sha256 and actual_sha256 != expected_sha256.upper():
+        raise ValueError(f"Real-ESRGAN ZIP SHA-256 不符: {actual_sha256}")
+
+    parent_dir = os.path.dirname(engine_dir)
+    os.makedirs(parent_dir, exist_ok=True)
+    staging_dir = tempfile.mkdtemp(prefix='.realesrgan-staging-', dir=parent_dir)
+    try:
+        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
+            _validate_safe_zip(zip_ref)
+            zip_ref.extractall(staging_dir)
+        executable_matches = list(Path(staging_dir).rglob('realesrgan-ncnn-vulkan.exe'))
+        if len(executable_matches) != 1:
+            raise ValueError("ZIP 內找不到唯一的 Real-ESRGAN 執行檔")
+        extracted_root = str(executable_matches[0].parent)
+        if not validate_sr_engine(extracted_root, expected_exe_sha256):
+            raise ValueError("ZIP 缺少必要模型或執行檔")
+        backup_dir = engine_dir + '.previous'
+        if os.path.exists(backup_dir):
+            shutil.rmtree(backup_dir)
+        if os.path.exists(engine_dir):
+            os.replace(engine_dir, backup_dir)
+        try:
+            shutil.move(extracted_root, engine_dir)
+            if not validate_sr_engine(engine_dir, expected_exe_sha256):
+                raise RuntimeError("Real-ESRGAN 安裝後驗證失敗")
+        except Exception:
+            if os.path.exists(engine_dir):
+                shutil.rmtree(engine_dir)
+            if os.path.exists(backup_dir):
+                os.replace(backup_dir, engine_dir)
+            raise
+        if os.path.exists(backup_dir):
+            shutil.rmtree(backup_dir)
+    finally:
+        if os.path.exists(staging_dir):
+            shutil.rmtree(staging_dir, ignore_errors=True)
+    return actual_sha256
+
 def check_and_download_sr_model():
     global sr_abort_flag
-    if not os.path.exists(NCNN_EXE_PATH):
+    if not validate_sr_engine():
         print(">>> [系統預檢] 偵測到本機缺乏 NCNN 超解析引擎 (realesrgan-ncnn-vulkan.exe)")
         print(">>> [系統動作] 正在背景非同步下載免安裝引擎，請稍候 (約 25MB)...")
+        partial_path = NCNN_ZIP_PATH + '.part'
         try:
             os.makedirs(NCNN_MODEL_DIR, exist_ok=True)
             req = urllib.request.urlopen(NCNN_DOWNLOAD_URL, timeout=30)
-            with open(NCNN_ZIP_PATH, 'wb') as f:
+            with open(partial_path, 'wb') as f:
                 while True:
                     if sr_abort_flag:
                         print(">>> [系統動作] 使用者已強制中止引擎下載！")
+                        req.close()
                         return False
                     chunk = req.read(8192)
                     if not chunk:
                         break
                     f.write(chunk)
-            print(">>> [系統動作] 下載完成，正在解壓縮引擎...")
-            with zipfile.ZipFile(NCNN_ZIP_PATH, 'r') as zip_ref:
-                zip_ref.extractall(NCNN_MODEL_DIR)
+            req.close()
+            os.replace(partial_path, NCNN_ZIP_PATH)
+            print(">>> [系統動作] 下載完成，正在驗證雜湊並安全解壓縮引擎...")
+            install_sr_engine_from_zip(NCNN_ZIP_PATH)
             os.remove(NCNN_ZIP_PATH)
-            print(">>> [系統動作] NCNN 引擎解壓縮完成！")
+            print(">>> [系統動作] NCNN 引擎驗證與解壓縮完成！")
         except Exception as e:
             print(f"❌ [數位鑑識崩潰]：NCNN 引擎下載失敗 ({e})")
             print("💡 [系統處置建議]：請確認對外網路連線，或手動下載並解壓縮至 models/realesrgan/ 目錄。")
-            if os.path.exists(NCNN_ZIP_PATH):
-                os.remove(NCNN_ZIP_PATH)
+            for download_path in (partial_path, NCNN_ZIP_PATH):
+                if os.path.exists(download_path):
+                    os.remove(download_path)
             return False
     return True
 
@@ -1743,39 +1994,40 @@ def run_ai_super_resolution(base64_str, mode='plate'):
                 if sr_abort_flag:
                     return
                 try:
-                    # NCNN 運算
                     print(f">>> [系統動作] 發動 NCNN 物理級 GPU 鑑識重建 ({mode} 模式)...")
-                    # 建立暫存圖
-                    temp_in = os.path.join(CONFIG.BASE_DIR, "temp_sr_in.png")
-                    temp_out = os.path.join(CONFIG.BASE_DIR, "temp_sr_out.png")
-                    cv2.imwrite(temp_in, img)
-                    
-                    # 選擇模型：車牌用 x4plus，人像用 x4plus-anime
                     model_name = "realesrgan-x4plus-anime" if mode == 'face' else "realesrgan-x4plus"
-                    
-                    # 呼叫 subprocess
-                    cmd = [NCNN_EXE_PATH, "-i", temp_in, "-o", temp_out, "-n", model_name]
-                    CREATE_NO_WINDOW = 0x08000000
-                    process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, creationflags=CREATE_NO_WINDOW)
-                    
-                    # 等待並允許中斷
-                    while process.poll() is None:
-                        if sr_abort_flag:
-                            process.terminate()
-                            print(">>> [系統動作] 鑑識重建已強制中止！")
-                            if os.path.exists(temp_in): os.remove(temp_in)
-                            if os.path.exists(temp_out): os.remove(temp_out)
-                            return
-                        time.sleep(0.1)
-                        
-                    if process.returncode == 0 and os.path.exists(temp_out):
+                    with tempfile.TemporaryDirectory(prefix='ag-sr-') as temp_dir:
+                        temp_in = os.path.join(temp_dir, "input.png")
+                        temp_out = os.path.join(temp_dir, "output.png")
+                        if not cv2.imwrite(temp_in, img):
+                            raise RuntimeError("無法建立 NCNN 暫存輸入影像")
+
+                        cmd = [NCNN_EXE_PATH, "-i", temp_in, "-o", temp_out, "-n", model_name]
+                        creation_flags = 0x08000000 if os.name == 'nt' else 0
+                        process = subprocess.Popen(
+                            cmd,
+                            cwd=NCNN_MODEL_DIR,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL,
+                            creationflags=creation_flags,
+                        )
+                        while process.poll() is None:
+                            if sr_abort_flag:
+                                process.terminate()
+                                try:
+                                    process.wait(timeout=3)
+                                except subprocess.TimeoutExpired:
+                                    process.kill()
+                                    process.wait(timeout=3)
+                                print(">>> [系統動作] 鑑識重建已強制中止！")
+                                return
+                            time.sleep(0.1)
+
+                        if process.returncode != 0 or not os.path.isfile(temp_out):
+                            raise RuntimeError(f"NCNN 引擎回傳錯誤代碼 {process.returncode}")
                         result = cv2.imread(temp_out)
-                    else:
-                        raise Exception(f"NCNN 引擎回傳錯誤代碼 {process.returncode}")
-                        
-                    # 清理暫存檔
-                    if os.path.exists(temp_in): os.remove(temp_in)
-                    if os.path.exists(temp_out): os.remove(temp_out)
+                        if result is None:
+                            raise RuntimeError("NCNN 輸出影像無法解碼")
                     
                 except Exception as ncnn_err:
                     print(f">>> [系統警告] NCNN 超解析執行失敗 ({ncnn_err})，自動切換至 OpenCV 備援流程！")
