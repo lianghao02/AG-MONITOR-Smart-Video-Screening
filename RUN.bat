@@ -5,6 +5,7 @@ cd /d "%~dp0"
 
 set "YOLO_CONFIG_DIR=%~dp0captures\.ultralytics"
 set "VENV_PYTHON=%~dp0.venv\Scripts\python.exe"
+set "SYSTEM_PYTHON="
 if /I "%~1"=="--verify-only" set "VERIFY_ONLY=1"
 if not exist "%YOLO_CONFIG_DIR%" mkdir "%YOLO_CONFIG_DIR%" >nul 2>&1
 
@@ -26,25 +27,23 @@ if exist "%VENV_PYTHON%" (
     echo [!] Project virtual environment remains unavailable.
 )
 
-rem Defense 2: Use a supported system Python only to create the project .venv.
-py -3 -c "import sys; sys.exit(sys.version_info[:2] not in [(3,10),(3,11),(3,12),(3,13)])" >nul 2>&1
-if not errorlevel 1 goto CREATE_VENV_WITH_PY
-python -c "import sys; sys.exit(sys.version_info[:2] not in [(3,10),(3,11),(3,12),(3,13)])" >nul 2>&1
-if not errorlevel 1 goto CREATE_VENV_WITH_PYTHON
+rem Defense 2: Discover a real Python executable and reject WindowsApps aliases.
+for /f "delims=" %%I in ('py -3 -c "import sys; p=sys.executable; print(p) if 'windowsapps' not in p.lower() else None" 2^>nul') do if exist "%%I" set "SYSTEM_PYTHON=%%I"
+if not defined SYSTEM_PYTHON if exist "%LOCALAPPDATA%\Python\pythoncore-3.13-64\python.exe" set "SYSTEM_PYTHON=%LOCALAPPDATA%\Python\pythoncore-3.13-64\python.exe"
+if not defined SYSTEM_PYTHON if exist "%LOCALAPPDATA%\Python\pythoncore-3.12-64\python.exe" set "SYSTEM_PYTHON=%LOCALAPPDATA%\Python\pythoncore-3.12-64\python.exe"
+if not defined SYSTEM_PYTHON if exist "%LOCALAPPDATA%\Programs\Python\Python313\python.exe" set "SYSTEM_PYTHON=%LOCALAPPDATA%\Programs\Python\Python313\python.exe"
+if not defined SYSTEM_PYTHON if exist "%LOCALAPPDATA%\Programs\Python\Python312\python.exe" set "SYSTEM_PYTHON=%LOCALAPPDATA%\Programs\Python\Python312\python.exe"
+
+if defined SYSTEM_PYTHON (
+    "%SYSTEM_PYTHON%" -c "import sys; sys.exit(sys.version_info[:2] not in [(3,10),(3,11),(3,12),(3,13)])" >nul 2>&1
+    if not errorlevel 1 goto CREATE_VENV
+)
 goto CHECK_EMBED
 
-:CREATE_VENV_WITH_PY
-echo [InBox] Creating isolated .venv with Python launcher...
-py -3 -m venv ".venv"
+:CREATE_VENV
+echo [InBox] Creating isolated .venv with %SYSTEM_PYTHON%...
+"%SYSTEM_PYTHON%" -m venv ".venv"
 if errorlevel 1 goto CHECK_EMBED
-goto INSTALL_VENV
-
-:CREATE_VENV_WITH_PYTHON
-echo [InBox] Creating isolated .venv with system Python...
-python -m venv ".venv"
-if errorlevel 1 goto CHECK_EMBED
-
-:INSTALL_VENV
 "%VENV_PYTHON%" -m pip install --disable-pip-version-check -r requirements.txt
 if errorlevel 1 goto CHECK_EMBED
 "%VENV_PYTHON%" verify_runtime.py >nul 2>&1
