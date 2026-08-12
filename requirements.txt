@@ -1,0 +1,7 @@
+# AG-MONITOR 核心執行依賴（Python 3.10～3.13）
+av==17.1.0
+Eel==0.18.2
+lap==0.5.13
+opencv-contrib-python==4.13.0.92
+opencv-python==4.13.0.92
+ultralytics==8.4.67

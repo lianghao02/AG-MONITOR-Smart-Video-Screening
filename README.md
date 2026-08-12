@@ -20,6 +20,26 @@
 python main.py
 ```
 
+`RUN.bat` 會優先驗證專案 `.venv` 的固定套件版本，無可用系統 Python 時才切換至 `python-embed`。僅檢查環境、不開啟介面可執行：
+
+```bat
+RUN.bat --verify-only
+```
+
+## 鑑識可追溯性
+
+每支影片開始分析前，系統會將原始路徑、檔案大小、修改時間與 SHA-256 寫入本次鑑識紀錄。若無法完成雜湊，該影片不會進入分析，避免產生無法對應原始證物的截圖。
+
+## 自動化測試
+
+將測試影片放入被 Git 忽略的 `input_videos/`，再以可攜核心執行：
+
+```bat
+python-embed\python.exe -B tests\test_forensic_core.py -v
+python-embed\python.exe -B tests\test_process_context.py -v
+python-embed\python.exe -B tests\test_real_videos.py -v
+```
+
 ## 技術棧
 - **PyAV** (零拷貝全記憶體極速解碼，解決壞軌容錯)
 - **Ultralytics YOLOv8 & ByteTrack** (強健的多目標辨識與軌跡追蹤)

@@ -1,0 +1,8 @@
+# 可攜核心修復清單；明列曾發生內容殘缺的關鍵間接套件。
+-r requirements.txt
+PyYAML==6.0.3
+setuptools==81.0.0
+ultralytics-thop==2.1.6
+urllib3==2.7.0
+zope.event==6.2
+zope.interface==8.5

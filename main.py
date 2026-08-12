@@ -3,10 +3,18 @@ os.environ["OPENCV_FFMPEG_LOG_LEVEL"] = "-1"
 os.environ["PYAV_LOGGING"] = "off"
 os.environ["YOLO_VERBOSE"] = "False"
 os.environ["YOLO_OFFLINE"] = "True"
+# 將 Ultralytics 執行設定留在專案的忽略目錄內，避免可攜模式
+# 依賴或污染目前 Windows 使用者的 AppData 設定。
+os.environ.setdefault(
+    "YOLO_CONFIG_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures", ".ultralytics"),
+)
+os.makedirs(os.environ["YOLO_CONFIG_DIR"], exist_ok=True)
 import cv2
 import numpy as np
 import time
 import base64
+import hashlib
 import math
 import re
 import urllib.request
@@ -17,8 +25,14 @@ import threading
 from threading import Thread
 from PIL import Image, ImageDraw, ImageFont
 import eel
-import tkinter as tk
-from tkinter import filedialog
+try:
+    import tkinter as tk
+    from tkinter import filedialog
+except ImportError:
+    # Python 官方 embeddable 套件不包含 Tcl/Tk；可攜模式改走
+    # Windows Forms 對話框，避免程式在啟動階段直接中止。
+    tk = None
+    filedialog = None
 import av
 import traceback
 import gc
@@ -49,6 +63,7 @@ class CONFIG:
     SMART_SKIP_SEC = 3.0   
     MOTION_THRESH = 25     
     MOTION_MIN_AREA = 500  
+    HASH_CHUNK_SIZE = 4 * 1024 * 1024
 
     TARGET_CLASSES = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
 
@@ -75,6 +90,47 @@ def write_report(msg):
         pass
 
 
+def calculate_sha256(file_path, chunk_size=CONFIG.HASH_CHUNK_SIZE):
+    """以串流方式計算證物雜湊，避免大型監視器影片占滿記憶體。"""
+    digest = hashlib.sha256()
+    with open(file_path, "rb") as file_obj:
+        while chunk := file_obj.read(chunk_size):
+            digest.update(chunk)
+    return digest.hexdigest().upper()
+
+
+def build_evidence_metadata(file_path):
+    """建立可寫入鑑識紀錄的原始證物識別資料。"""
+    absolute_path = os.path.abspath(file_path)
+    stat = os.stat(absolute_path)
+    return {
+        "path": absolute_path,
+        "name": os.path.basename(absolute_path),
+        "size": stat.st_size,
+        "modified": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
+        "sha256": calculate_sha256(absolute_path),
+    }
+
+
+def format_enabled_classes(class_settings):
+    enabled = [
+        CONFIG.TARGET_CLASSES[class_id]
+        for class_id in CONFIG.TARGET_CLASSES
+        if class_settings.get(str(class_id), True)
+    ]
+    return ", ".join(enabled) if enabled else "無"
+
+
+def resolve_live_processing_settings(live_settings, current_settings):
+    """合併分析中的即時設定；未變更欄位沿用目前值。"""
+    resolved = current_settings.copy()
+    for key in ("confThresh", "fastMode", "skipSec", "classes", "captureMode", "filterStationary"):
+        if key in live_settings:
+            resolved[key] = live_settings[key]
+    resolved["skipSec"] = float(resolved["skipSec"])
+    return resolved
+
+
 # Player State
 engine_mode = 'auto' # 'auto' or 'manual'
 player_state = {
@@ -91,17 +147,80 @@ player_state = {
 player_lock = threading.Lock()
 real_roi_poly = None
 
+
+def _run_windows_dialog(script):
+    """在沒有 tkinter 的可攜環境中呼叫 Windows 原生選檔對話框。"""
+    completed = subprocess.run(
+        ["powershell.exe", "-NoProfile", "-STA", "-Command", script],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=0x08000000,
+        check=False,
+    )
+    if completed.returncode != 0:
+        dlog(f"[DIALOG] Windows Forms 對話框失敗: {completed.stderr.strip()}")
+        return []
+    return [line.strip() for line in completed.stdout.splitlines() if line.strip()]
+
+
+def _select_video_files():
+    if filedialog is not None:
+        root = tk.Tk()
+        root.attributes("-topmost", True)
+        root.withdraw()
+        try:
+            return list(filedialog.askopenfilenames(
+                title="選擇視訊檔案",
+                filetypes=[("視訊檔案", "*.mp4 *.avi *.mkv *.mov *.m4v *.h264 *.h265 *.264 *.265 *.dav *.flv *.ts *.wmv")],
+            ))
+        finally:
+            root.destroy()
+
+    script = r'''
+$ErrorActionPreference = 'Stop'
+$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.OpenFileDialog
+$dialog.Title = '選擇視訊檔案'
+$dialog.Multiselect = $true
+$dialog.Filter = '視訊檔案|*.mp4;*.avi;*.mkv;*.mov;*.m4v;*.h264;*.h265;*.264;*.265;*.dav;*.flv;*.ts;*.wmv|所有檔案|*.*'
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    $dialog.FileNames | ForEach-Object { [Console]::Out.WriteLine($_) }
+}
+'''
+    return _run_windows_dialog(script)
+
+
+def _select_video_folder():
+    if filedialog is not None:
+        root = tk.Tk()
+        root.attributes("-topmost", True)
+        root.withdraw()
+        try:
+            return filedialog.askdirectory(title="選擇包含影片的資料夾 (將自動掃描所有子資料夾)")
+        finally:
+            root.destroy()
+
+    script = r'''
+$ErrorActionPreference = 'Stop'
+$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()
+Add-Type -AssemblyName System.Windows.Forms
+$dialog = New-Object System.Windows.Forms.FolderBrowserDialog
+$dialog.Description = '選擇包含影片的資料夾（將自動掃描所有子資料夾）'
+$dialog.ShowNewFolderButton = $false
+if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+    [Console]::Out.WriteLine($dialog.SelectedPath)
+}
+'''
+    paths = _run_windows_dialog(script)
+    return paths[0] if paths else ""
+
 @eel.expose
 def add_videos_dialog():
     global video_queue
-    root = tk.Tk()
-    root.attributes("-topmost", True)
-    root.withdraw()
-    files = filedialog.askopenfilenames(
-        title="選擇視訊檔案",
-        filetypes=[("視訊檔案", "*.mp4 *.avi *.mkv *.mov *.m4v *.h264 *.h265 *.264 *.265 *.dav *.flv *.ts *.wmv")]
-    )
-    root.destroy()
+    files = _select_video_files()
     
     added_paths = []
     if files:
@@ -118,11 +237,7 @@ def add_videos_dialog():
 @eel.expose
 def add_folder_dialog():
     global video_queue
-    root = tk.Tk()
-    root.attributes("-topmost", True)
-    root.withdraw()
-    folder_path = filedialog.askdirectory(title="選擇包含影片的資料夾 (將自動掃描所有子資料夾)")
-    root.destroy()
+    folder_path = _select_video_folder()
     
     if not folder_path:
         return []
@@ -271,7 +386,14 @@ def request_stop():
 @eel.expose
 def update_live_setting(key, value):
     global global_live_settings
+    old_value = global_live_settings.get(key)
     global_live_settings[key] = value
+    if is_processing and old_value != value:
+        if key == "classes":
+            display_value = format_enabled_classes(value)
+        else:
+            display_value = value
+        write_report(f"⚙️ 執行中設定變更: {key} = {display_value}")
 
 @eel.expose
 def set_engine_mode(mode):
@@ -414,13 +536,32 @@ def get_real_roi_polygon():
         real_pts.append([rx, ry])
     return np.array(real_pts, dtype=np.int32)
 
-def process_wrapper(video_path, video_name, settings, batch_output_dir, ui_queue, shared_state, model_name):
+
+def _configure_worker_context(process_engine_mode, report_path):
+    """設定 Windows spawn 子程序無法從主程序繼承的必要狀態。"""
+    global engine_mode, current_report_path
+    engine_mode = process_engine_mode
+    current_report_path = report_path
+
+
+def process_wrapper(
+    video_path,
+    video_name,
+    settings,
+    batch_output_dir,
+    ui_queue,
+    shared_state,
+    model_name,
+    process_engine_mode,
+    report_path,
+):
     import sys
     import threading
     import time
     from ultralytics import YOLO
     
-    global eel, stop_requested, skip_video_path, player_state, global_live_settings, roi_points, scale_info, model
+    global eel, stop_requested, skip_video_path, player_state, global_live_settings
+    global roi_points, scale_info, model
     
     class MockEel:
         def __getattr__(self, name):
@@ -437,6 +578,10 @@ def process_wrapper(video_path, video_name, settings, batch_output_dir, ui_queue
     global_live_settings = shared_state.get('live_settings', {})
     roi_points = shared_state.get('roi_points', [])
     scale_info = shared_state.get('scale_info', None)
+    # Windows multiprocessing 使用 spawn，子程序不會繼承主程序的全域狀態。
+    # 模式與鑑識紀錄路徑必須明確傳入，否則人工點視會退回 auto，
+    # 子程序產生的截圖與錯誤也無法寫入本次鑑識紀錄。
+    _configure_worker_context(process_engine_mode, report_path)
     
     sub_sync_running = True
     def sub_sync_thread():
@@ -496,7 +641,14 @@ def batch_processing_worker(settings):
             
         write_report("=== AG-MONITOR 科技偵查戰術分析紀錄 ===")
         write_report(f"AI 核心模型: {model_name}")
+        write_report(f"執行模式: {engine_mode}")
+        write_report(f"信心門檻: {settings.get('confThresh', 0.40)}")
+        write_report(f"啟用類別: {format_enabled_classes(settings.get('classes', {}))}")
+        write_report(f"蒐證模式: {settings.get('captureMode', '')}")
         write_report(f"極速背景處理: {'開啟' if settings.get('fastMode', True) else '關閉'}")
+        write_report(f"靜止物件過濾: {'開啟' if settings.get('filterStationary', True) else '關閉'}")
+        write_report(f"空景跳躍間隔: {settings.get('skipSec', 0.20)} 秒")
+        write_report(f"批次集中資料夾: {'開啟' if single_folder else '關閉'}")
         write_report("=========================================\n")
 
         manager = multiprocessing.Manager()
@@ -554,11 +706,33 @@ def batch_processing_worker(settings):
             
             eel.updateStatus(f"狀態: 正在分析 ({current_idx + 1}/{total_v}) {v_name}", "ok")
             eel.appendLog(f"開始載入影片: {v_name}", "info")
-            write_report(f"▶ 開始分析影片: {v_name}")
+            write_report(f"▶ 開始分析影片 ({current_idx + 1}/{total_v}): {v_name}")
+            try:
+                evidence = build_evidence_metadata(video_path)
+                write_report(f"  原始路徑: {evidence['path']}")
+                write_report(f"  檔案大小: {evidence['size']} bytes")
+                write_report(f"  檔案修改時間: {evidence['modified']}")
+                write_report(f"  SHA-256: {evidence['sha256']}")
+            except Exception as hash_error:
+                write_report(f"  ❌ 無法建立原始證物雜湊: {hash_error}")
+                eel.appendLog(f"{v_name} 無法建立 SHA-256，已停止以避免產生不可追溯證物", "danger")
+                write_report(f"⛔ 分析狀態: 雜湊失敗，未進入分析\n")
+                current_idx += 1
+                continue
             
             p = multiprocessing.Process(
                 target=process_wrapper, 
-                args=(video_path, v_name, settings, batch_output_dir, ui_queue, shared_state, model_name)
+                args=(
+                    video_path,
+                    v_name,
+                    settings,
+                    batch_output_dir,
+                    ui_queue,
+                    shared_state,
+                    model_name,
+                    engine_mode,
+                    current_report_path,
+                )
             )
             p.start()
             
@@ -568,14 +742,19 @@ def batch_processing_worker(settings):
                     shared_state['stop_requested'] = True
                 p.join(timeout=0.5)
             
+            requested_path = shared_state['skip_video_path']
             if p.exitcode != 0:
-                write_report(f"❌ 發生致命崩潰錯誤 (看門狗已介入)\n")
+                write_report(f"❌ 分析狀態: 致命錯誤 (離開代碼: {p.exitcode}，看門狗已介入)\n")
+            elif stop_requested:
+                write_report("⏹️ 分析狀態: 使用者中止\n")
+            elif requested_path is not None:
+                write_report(f"⏭️ 分析狀態: 使用者要求跳轉至 {os.path.basename(requested_path)}\n")
             else:
-                write_report(f"✅ 完成分析影片: {v_name}\n")
+                write_report(f"✅ 分析狀態: 完成 {v_name}\n")
             gc.collect()
             
             # Check if user requested to skip to a specific video during this process
-            skip_path = shared_state['skip_video_path']
+            skip_path = requested_path
             if skip_path is not None:
                 try:
                     current_idx = q.index(skip_path)
@@ -587,15 +766,18 @@ def batch_processing_worker(settings):
         if stop_requested:
             eel.updateStatus("狀態: 已由使用者手動中止", "danger")
             eel.appendLog("任務被中斷", "warn")
+            write_report("=== 批次任務狀態: 使用者中止 ===")
         else:
             eel.updateProgress(100, "")
             eel.updateStatus("狀態: 全部完成！", "ok")
             eel.appendLog("所有佇列影片處理完成", "success")
+            write_report("=== 批次任務狀態: 全部完成 ===")
 
     except Exception as e:
         err_msg = traceback.format_exc()
         eel.updateStatus("系統崩潰", "danger")
         eel.appendLog(f"系統崩潰: {str(e)}", "error")
+        write_report(f"=== 批次任務狀態: 系統崩潰 ({str(e)}) ===")
         print(err_msg)
     finally:
         sync_running = False
@@ -715,6 +897,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
 
         conf_thresh, class_vars = settings['confThresh'], settings['classes']
         capture_mode, fast_mode = settings.get('captureMode', ''), settings.get('fastMode', True)
+        filter_stationary = settings.get('filterStationary', True)
         skip_sec = float(settings.get('skipSec', 0.20))
         static_skip_step = max(1, int(fps * skip_sec))
         
@@ -917,9 +1100,20 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
 
 
             else:
-                conf_thresh = global_live_settings.get('confThresh', conf_thresh)
-                fast_mode = global_live_settings.get('fastMode', fast_mode)
-                skip_sec = float(global_live_settings.get('skipSec', skip_sec))
+                live_values = resolve_live_processing_settings(global_live_settings, {
+                    'confThresh': conf_thresh,
+                    'fastMode': fast_mode,
+                    'skipSec': skip_sec,
+                    'classes': class_vars,
+                    'captureMode': capture_mode,
+                    'filterStationary': filter_stationary,
+                })
+                conf_thresh = live_values['confThresh']
+                fast_mode = live_values['fastMode']
+                skip_sec = live_values['skipSec']
+                class_vars = live_values['classes']
+                capture_mode = live_values['captureMode']
+                filter_stationary = live_values['filterStationary']
                 static_skip_step = max(1, int(fps * skip_sec))
                 
                 # 依據動態狀態切換解碼模式
@@ -1265,13 +1459,11 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     push_frame_to_ui(frame, valid_targets, real_roi_poly, time_code_str)
                     
                 # 每幀都執行 GC，確保已移動物件在消失後立即儲存截圖
-                filter_stationary = settings.get('filterStationary', True)
                 _run_grace_period_gc(milliseconds, track_states, capture_mode, output_dir, clean_v_name, filter_stationary)
 
                 target_frame_idx += 1 
 
         if engine_mode == 'auto':
-            filter_stationary = settings.get('filterStationary', True)
             _flush_all_track_states(track_states, capture_mode, output_dir, clean_v_name, filter_stationary)
         container.close()
 

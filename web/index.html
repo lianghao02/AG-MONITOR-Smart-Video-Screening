@@ -643,6 +643,11 @@
             if(isProcessing) eel.update_live_setting('fastMode', this.checked)();
         };
 
+        const filterStationaryCb = document.getElementById("filterStationary");
+        filterStationaryCb.onchange = function() {
+            if(isProcessing) eel.update_live_setting('filterStationary', this.checked)();
+        };
+
         document.getElementById("captureMode").onchange = function() {
             if(isProcessing) eel.update_live_setting('captureMode', this.value)();
         };
@@ -846,7 +851,7 @@
                     "7": document.getElementById("cls_truck").checked
                 },
                 fastMode: fastModeCb.checked,
-                filterStationary: document.getElementById("filterStationary").checked,
+                filterStationary: filterStationaryCb.checked,
                 skipSec: parseFloat(skipSecSlider.value),
                 singleFolder: document.getElementById("singleFolder").checked
             };

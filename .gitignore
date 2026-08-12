@@ -1,6 +1,7 @@
 # 環境與快取
 .venv/
 __pycache__/
+debug.log
 .antigravity/
 python-embed/
 
