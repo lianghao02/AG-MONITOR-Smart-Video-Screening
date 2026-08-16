@@ -12,22 +12,23 @@
             height: 100vh; 
             width: 100vw;
             overflow: hidden; 
-            background-color: #121212; 
-            color: #E0E0E0; 
-            font-family: "Microsoft JhengHei", sans-serif;
+            background-color: #F3F5F8;
+            color: #2B364B;
+            font-family: "Microsoft JhengHei", "Segoe UI", system-ui, sans-serif;
             display: flex;
             flex-direction: column;
         }
 
         /* Variables */
         :root {
-            --bg-dark: #1E1E1E;
-            --bg-panel: #252526;
-            --border-color: #333333;
-            --accent-green: #00FF66;
-            --accent-blue: #007ACC;
-            --text-main: #E0E0E0;
-            --text-muted: #A0A0A0;
+            --bg-dark: #F3F5F8;
+            --bg-panel: rgba(255, 255, 255, 0.9);
+            --border-color: rgba(107, 139, 176, 0.24);
+            --accent-green: #52745F;
+            --accent-blue: #526F94;
+            --text-main: #2B364B;
+            --text-muted: #667080;
+            --shadow: 0 8px 30px rgba(160, 175, 195, 0.12);
         }
 
         /* Layout */
@@ -77,23 +78,23 @@
         .queue-box {
             flex-grow: 1;
             overflow-y: auto;
-            background: #1A1A1A;
+            background: rgba(255, 255, 255, 0.75);
             border: 1px solid var(--border-color);
             margin-top: 10px;
             padding: 5px;
         }
         .queue-item {
             padding: 5px;
-            border-bottom: 1px solid #333;
+            border-bottom: 1px solid var(--border-color);
             font-size: 13px;
         }
 
         /* Form elements */
         .btn-group { display: flex; gap: 5px; }
         .btn {
-            background-color: #333;
-            color: white;
-            border: 1px solid #444;
+            background-color: #E8EDF3;
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
             padding: 6px 12px;
             cursor: pointer;
             border-radius: 4px;
@@ -102,9 +103,9 @@
             text-align: center;
             transition: 0.2s;
         }
-        .btn:hover { background-color: #444; }
-        .btn-start { background-color: #007ACC; border-color: #005A9E; }
-        .btn-start:hover { background-color: #005A9E; }
+        .btn:hover { background-color: #DCE5EF; }
+        .btn-start { background-color: var(--accent-blue); border-color: #58789A; color: #fff; }
+        .btn-start:hover { background-color: #58789A; }
         .btn-stop { background-color: #D9383A; border-color: #A32A2B; }
         .btn-stop:hover { background-color: #A32A2B; }
         .btn-active { background-color: var(--accent-green); color: black; font-weight: bold; }
@@ -115,9 +116,9 @@
         
         .cyber-select {
             width: 100%;
-            background: #333;
-            color: white;
-            border: 1px solid #555;
+            background: rgba(255, 255, 255, 0.9);
+            color: var(--text-main);
+            border: 1px solid var(--border-color);
             padding: 5px;
         }
 
@@ -125,7 +126,7 @@
         /* Top Mode Switcher */
         .mode-switcher-bar {
             height: 50px;
-            background: #1A1A1A;
+            background: rgba(255, 255, 255, 0.82);
             border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
@@ -134,8 +135,8 @@
         }
         .mode-btn {
             padding: 8px 20px;
-            background: #252526;
-            border: 1px solid #444;
+            background: rgba(255, 255, 255, 0.78);
+            border: 1px solid var(--border-color);
             color: var(--text-muted);
             border-radius: 20px;
             cursor: pointer;
@@ -144,10 +145,10 @@
             transition: all 0.3s;
         }
         .mode-btn.active {
-            background: rgba(0, 255, 102, 0.1);
+            background: rgba(110, 156, 131, 0.12);
             color: var(--accent-green);
             border-color: var(--accent-green);
-            box-shadow: 0 0 10px rgba(0,255,102,0.3);
+            box-shadow: 0 0 10px rgba(110, 156, 131, 0.22);
         }
 
         /* Canvas Area */
@@ -171,10 +172,19 @@
             text-align: center;
             line-height: 1.5;
         }
+        .placeholder-text::before {
+            content: "";
+            display: block;
+            width: 46px;
+            height: 46px;
+            margin: 0 auto 10px;
+            opacity: .8;
+            background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='9' y='14' width='46' height='35' rx='7' fill='%23E8EDF3' stroke='%236B8BB0' stroke-width='3'/%3E%3Cpath d='m25 25 17 7-17 7z' fill='%236B8BB0'/%3E%3Ccircle cx='47' cy='20' r='4' fill='%236E9C83'/%3E%3C/svg%3E");
+        }
 
         /* Player Controls (PotPlayer Style) */
         .player-controls {
-            background: #1E1E1E;
+            background: rgba(255, 255, 255, 0.88);
             border-top: 1px solid var(--border-color);
             padding: 10px;
             display: flex;
@@ -211,11 +221,11 @@
             border-radius: 4px;
             transition: 0.2s;
         }
-        .icon-btn:hover { background: #333; color: white; }
+        .icon-btn:hover { background: #E8EDF3; color: var(--text-main); }
         .speed-btn {
-            background: #333;
-            border: 1px solid #444;
-            color: #CCC;
+            background: #E8EDF3;
+            border: 1px solid var(--border-color);
+            color: var(--text-main);
             padding: 4px 8px;
             cursor: pointer;
             border-radius: 4px;
@@ -231,15 +241,15 @@
         /* Bottom Log Area */
         .log-wrapper {
             height: 200px;
-            background: #1A1A1A;
+            background: rgba(255, 255, 255, 0.88);
             border-top: 1px solid var(--border-color);
             display: flex;
             flex-direction: column;
         }
         .status-bar {
             padding: 5px 10px;
-            background: #252526;
-            border-bottom: 1px solid #333;
+            background: #EDF2F5;
+            border-bottom: 1px solid var(--border-color);
             display: flex;
             justify-content: space-between;
             font-size: 13px;
@@ -266,7 +276,7 @@
         /* Global Tab Bar */
         .global-tab-bar {
             height: 40px;
-            background: #000;
+            background: #EDF2F5;
             border-bottom: 1px solid var(--border-color);
             display: flex;
             align-items: center;
