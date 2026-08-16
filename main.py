@@ -60,6 +60,23 @@ except Exception:
     pass
 dlog("=== main.py 啟動 ===")
 
+def safe_base64_decode(base64_str, max_bytes=50 * 1024 * 1024):
+    """安全解析 Base64 數據，防禦過長字串 OOM、data-URI 前綴與格式毀損。"""
+    if not isinstance(base64_str, str):
+        return None, "傳入資料非字串格式"
+    if "," in base64_str:
+        base64_str = base64_str.split(",", 1)[1]
+    base64_str = base64_str.strip()
+    if len(base64_str) > max_bytes:
+        return None, f"Base64 資料超出安全容量限制 ({len(base64_str)} > {max_bytes} bytes)"
+    missing_padding = len(base64_str) % 4
+    if missing_padding:
+        base64_str += "=" * (4 - missing_padding)
+    try:
+        return base64.b64decode(base64_str), None
+    except Exception as err:
+        return None, f"Base64 解碼失敗: {err}"
+
 class CONFIG:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     CAPTURES_DIR = os.path.join(BASE_DIR, "captures")
@@ -1104,8 +1121,12 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             container.seek(pts, stream=stream, backward=True)
                             frame_iter = container.decode(stream)
                             local_decoded_idx = -1
-                        except Exception:
-                            pass
+                        except Exception as seek_err:
+                            dlog(f"[DECODER] Seek 失敗 (pts={pts}, target_idx={target_idx}): {seek_err}")
+                            try:
+                                frame_iter = container.decode(stream)
+                            except Exception:
+                                pass
                         # Flush existing queue items
                         while not frame_queue.empty():
                             try:
@@ -1707,12 +1728,18 @@ def _run_grace_period_gc(curr_msec, track_states, capture_mode, output_dir, pref
         else:
             if capture_mode in ["雙格蒐證模式 (起點+最清晰)", "單次最清晰模式 (推薦)"]:
                 if state['best_frame'] is not None:
-                    save_legal_screenshot(state['best_frame'], output_dir, state['best_timecode'], state['best_summary'], prefix_name, state.get('best_target_info'))
-                    eel.appendLog(f"[{state['best_timecode']}] 擷取 {state['best_summary'][0]}", "success")
+                    capture_path = save_legal_screenshot(state['best_frame'], output_dir, state['best_timecode'], state['best_summary'], prefix_name, state.get('best_target_info'))
+                    if capture_path:
+                        eel.appendLog(f"[{state['best_timecode']}] 擷取 {state['best_summary'][0]}", "success")
+                    else:
+                        eel.appendLog(f"[{state['best_timecode']}] 寫入 {state['best_summary'][0]} 失敗", "error")
             elif capture_mode == "事件起訖模式":
                 if state['last_frame'] is not None:
-                    save_legal_screenshot(state['last_frame'], output_dir, state['last_timecode'], [f"ID:{tid} {state['class_name']}(Exit)"], prefix_name, state.get('last_target_info'))
-                    eel.appendLog(f"[{state['last_timecode']}] 擷取 ID:{tid} {state['class_name']}(Exit)", "success")
+                    capture_path = save_legal_screenshot(state['last_frame'], output_dir, state['last_timecode'], [f"ID:{tid} {state['class_name']}(Exit)"], prefix_name, state.get('last_target_info'))
+                    if capture_path:
+                        eel.appendLog(f"[{state['last_timecode']}] 擷取 ID:{tid} {state['class_name']}(Exit)", "success")
+                    else:
+                        eel.appendLog(f"[{state['last_timecode']}] 寫入 ID:{tid} {state['class_name']}(Exit) 失敗", "error")
         del track_states[tid]
 
 def _flush_all_track_states(track_states, capture_mode, output_dir, prefix_name, filter_stationary=True):
@@ -1721,13 +1748,46 @@ def _flush_all_track_states(track_states, capture_mode, output_dir, prefix_name,
             continue
         if capture_mode in ["雙格蒐證模式 (起點+最清晰)", "單次最清晰模式 (推薦)"]:
             if state['best_frame'] is not None:
-                save_legal_screenshot(state['best_frame'], output_dir, state['best_timecode'], state['best_summary'], prefix_name, state.get('best_target_info'))
-                eel.appendLog(f"[{state['best_timecode']}] 擷取 {state['best_summary'][0]}", "success")
+                capture_path = save_legal_screenshot(state['best_frame'], output_dir, state['best_timecode'], state['best_summary'], prefix_name, state.get('best_target_info'))
+                if capture_path:
+                    eel.appendLog(f"[{state['best_timecode']}] 擷取 {state['best_summary'][0]}", "success")
+                else:
+                    eel.appendLog(f"[{state['best_timecode']}] 寫入 {state['best_summary'][0]} 失敗", "error")
         elif capture_mode == "事件起訖模式":
             if state['last_frame'] is not None:
-                save_legal_screenshot(state['last_frame'], output_dir, state['last_timecode'], [f"ID:{tid} {state['class_name']}(Exit)"], prefix_name, state.get('last_target_info'))
-                eel.appendLog(f"[{state['last_timecode']}] 擷取 ID:{tid} {state['class_name']}(Exit)", "success")
+                capture_path = save_legal_screenshot(state['last_frame'], output_dir, state['last_timecode'], [f"ID:{tid} {state['class_name']}(Exit)"], prefix_name, state.get('last_target_info'))
+                if capture_path:
+                    eel.appendLog(f"[{state['last_timecode']}] 擷取 ID:{tid} {state['class_name']}(Exit)", "success")
+                else:
+                    eel.appendLog(f"[{state['last_timecode']}] 寫入 ID:{tid} {state['class_name']}(Exit) 失敗", "error")
     track_states.clear()
+
+CAPTURES_DIR = CONFIG.CAPTURES_DIR
+CAPTURE_MANIFEST_FILENAME = "鑑識截圖清冊.jsonl"
+
+
+def _append_capture_manifest(output_dir, capture_path, time_code, objects_list, source_prefix):
+    """追加一筆可機讀的截圖鑑識紀錄，並立即刷入磁碟。"""
+    record = {
+        "version": 1,
+        "recorded_at": datetime.now().astimezone().isoformat(timespec="milliseconds"),
+        "path": os.path.abspath(capture_path),
+        "filename": os.path.basename(capture_path),
+        "size": os.path.getsize(capture_path),
+        "sha256": calculate_sha256(capture_path),
+        "time_code": time_code,
+        "targets": list(objects_list),
+        "source_prefix": source_prefix,
+        "report_path": os.path.abspath(current_report_path) if current_report_path else None,
+    }
+    manifest_dir = os.path.dirname(current_report_path) if current_report_path else output_dir
+    manifest_path = os.path.join(manifest_dir, CAPTURE_MANIFEST_FILENAME)
+    with open(manifest_path, "a", encoding="utf-8", newline="\n") as manifest_file:
+        manifest_file.write(json.dumps(record, ensure_ascii=False) + "\n")
+        manifest_file.flush()
+        os.fsync(manifest_file.fileno())
+    return record
+
 
 def save_legal_screenshot(frame, output_dir, time_code, objects_list, prefix_name="evidence", target_info=None):
     dlog(f"[DEBUG-SAVE] save_legal_screenshot called: output_dir={output_dir}, time_code={time_code}")
@@ -1829,18 +1889,33 @@ def save_legal_screenshot(frame, output_dir, time_code, objects_list, prefix_nam
     try:
         is_success, buffer = cv2.imencode('.jpg', final_bgr)
         if is_success:
-            with open(final_path, 'wb') as f:
-                f.write(buffer)
-            dlog(f"[DEBUG-SAVE] ✅ File written OK: {final_path}")
-            write_report(f"  📸 [截圖] 時間: {time_code} | 目標: {', '.join(objects_list)} | 檔名: {filename}")
+            stem, extension = os.path.splitext(final_path)
+            collision_index = 0
+            while True:
+                actual_path = final_path if collision_index == 0 else f"{stem}_{collision_index}{extension}"
+                try:
+                    with open(actual_path, 'xb') as f:
+                        f.write(buffer.tobytes() if hasattr(buffer, "tobytes") else buffer)
+                    break
+                except FileExistsError:
+                    collision_index += 1
+            manifest_record = _append_capture_manifest(output_dir, actual_path, time_code, objects_list, prefix_name)
+            dlog(f"[DEBUG-SAVE] ✅ File written OK: {actual_path}")
+            write_report(
+                f"  📸 [截圖] 時間: {time_code} | 目標: {', '.join(objects_list)} | "
+                f"檔名: {os.path.basename(actual_path)} | SHA-256: {manifest_record['sha256']}"
+            )
+            return actual_path
         else:
             dlog(f"[DEBUG-SAVE] ❌ cv2.imencode failed for {final_path}")
             write_report(f"  ❌ [截圖失敗] 編碼錯誤: {filename}")
+            return None
     except Exception as e:
         import traceback as tb
         dlog(f"[DEBUG-SAVE] ❌ Exception: {e}")
         dlog(tb.format_exc())
         write_report(f"  ❌ [截圖失敗] 寫入異常: {str(e)}")
+        return None
 
 # ==========================================
 # 鑑識超解析 (Super Resolution) - NCNN 模組
@@ -1973,7 +2048,10 @@ def run_ai_super_resolution(base64_str, mode='plate'):
 
     def _run_sr():
         try:
-            img_data = base64.b64decode(base64_str)
+            img_data, err = safe_base64_decode(base64_str)
+            if err:
+                eel.on_super_res_finished(None, f"❌ 影像編碼錯誤: {err}")()
+                return
             np_arr = np.frombuffer(img_data, np.uint8)
             img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
             
@@ -2075,7 +2153,10 @@ def save_enhanced_evidence(base64_str, mode='plate'):
         filename = f"{prefix}_{timestamp}.png"
         filepath = os.path.join(enhanced_dir, filename)
         
-        img_data = base64.b64decode(base64_str)
+        img_data, err = safe_base64_decode(base64_str)
+        if err:
+            print(f"❌ [數位鑑識崩潰]：修復檔案 Base64 解析失敗 ({err})")
+            return False
         with open(filepath, 'wb') as f:
             f.write(img_data)
             
@@ -2094,17 +2175,34 @@ def save_enhanced_evidence(base64_str, mode='plate'):
         print("💡 [系統處置建議]：請確認 enhanced_evidence 目錄未被防毒軟體或隨身碟唯讀保護。")
         return False
 
+def start_eel_app():
+    web_dir = os.path.join(CONFIG.BASE_DIR, 'web')
+    eel.init(web_dir)
+    default_port = 8000
+    max_attempts = 10
+
+    for port_offset in range(max_attempts):
+        current_port = default_port + port_offset
+        try:
+            print("==================================================")
+            print("AG-MONITOR Forensic Player Engine Online!")
+            print(f"http://localhost:{current_port}/index.html")
+            print("==================================================")
+            dlog(f"[BOOT] 嘗試於埠號 {current_port} 啟動 Eel GUI...")
+            eel.start('index.html', size=(1280, 950), mode='edge', port=current_port, host='localhost')
+            break
+        except (OSError, Exception) as boot_err:
+            dlog(f"[BOOT] 埠號 {current_port} 啟動失敗 ({boot_err})，準備切換備援埠號...")
+            if port_offset == max_attempts - 1:
+                print(f"[FATAL ERROR] 嘗試 {max_attempts} 個埠號 ({default_port}~{current_port}) 皆啟動失敗: {boot_err}")
+                dlog(f"[BOOT] 致命錯誤: 所有備援埠號均無法綁定: {boot_err}")
+                raise
+
 if __name__ == "__main__":
     import multiprocessing
     multiprocessing.freeze_support()
     os.makedirs(CONFIG.CAPTURES_DIR, exist_ok=True)
     try:
-        web_dir = os.path.join(CONFIG.BASE_DIR, 'web')
-        eel.init(web_dir)
-        print("==================================================")
-        print("AG-MONITOR Forensic Player Engine Online!")
-        print("http://localhost:8000/index.html")
-        print("==================================================")
-        eel.start('index.html', size=(1280, 950), mode='edge', port=8000)
+        start_eel_app()
     except Exception as e:
         print("Eel Boot Failed:", e)

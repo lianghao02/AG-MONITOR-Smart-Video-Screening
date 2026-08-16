@@ -1,4 +1,6 @@
 import multiprocessing
+import hashlib
+import json
 import os
 import queue
 import sys
@@ -148,8 +150,15 @@ class WorkerContextTests(unittest.TestCase):
 
             self.assertTrue(preview_received, "人工點視子程序沒有送出實體影片預覽幀")
             self.assertEqual(process.exitcode, 0)
-            self.assertTrue(list(Path(temp_dir).glob("*.jpg")), "人工點視沒有產生手動快門證物")
+            captures = list(Path(temp_dir).glob("*.jpg"))
+            self.assertTrue(captures, "人工點視沒有產生手動快門證物")
             self.assertIn("[截圖]", Path(report_path).read_text(encoding="utf-8"))
+            manifest_path = Path(temp_dir) / "鑑識截圖清冊.jsonl"
+            records = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(records), 1)
+            self.assertEqual(
+                records[0]["sha256"], hashlib.sha256(captures[0].read_bytes()).hexdigest().upper()
+            )
         manager.shutdown()
 
     def test_auto_mode_analyzes_real_video_in_spawn_worker(self):

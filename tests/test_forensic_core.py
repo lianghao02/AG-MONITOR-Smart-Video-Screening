@@ -336,6 +336,98 @@ class ForensicCoreTests(unittest.TestCase):
             main._flush_all_track_states(states, "持續追蹤模式 (預設)", "out", "video")
             self.assertEqual(save_mock.call_count, 0)
 
+    def test_same_timecode_captures_never_overwrite_existing_evidence(self):
+        source = np.full((24, 32, 3), 127, dtype=np.uint8)
+        with tempfile.TemporaryDirectory(dir=PROJECT_DIR) as temp_dir, patch.object(
+            main, "write_report"
+        ), patch.object(main, "current_report_path", str(Path(temp_dir) / "系統鑑識紀錄.txt")):
+            output_dir = Path(temp_dir) / "video"
+            first_path = main.save_legal_screenshot(
+                source.copy(), str(output_dir), "2026/03/26 17:37:28.123", ["ID:1 car"], "video"
+            )
+            second_path = main.save_legal_screenshot(
+                source.copy(), str(output_dir), "2026/03/26 17:37:28.123", ["ID:2 car"], "video"
+            )
+
+            self.assertIsNotNone(first_path)
+            self.assertIsNotNone(second_path)
+            self.assertNotEqual(first_path, second_path)
+            self.assertTrue(Path(first_path).is_file())
+            self.assertTrue(Path(second_path).is_file())
+            self.assertEqual(len(list(output_dir.glob("*.jpg"))), 2)
+            manifest_path = Path(temp_dir) / main.CAPTURE_MANIFEST_FILENAME
+            records = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines()]
+            self.assertEqual(len(records), 2)
+            self.assertEqual(records[0]["targets"], ["ID:1 car"])
+            self.assertEqual(records[1]["targets"], ["ID:2 car"])
+            self.assertTrue(all(record["source_prefix"] == "video" for record in records))
+            for record in records:
+                capture_path = Path(record["path"])
+                self.assertEqual(record["size"], capture_path.stat().st_size)
+                self.assertEqual(record["sha256"], hashlib.sha256(capture_path.read_bytes()).hexdigest().upper())
+
+    def test_capture_manifest_failure_does_not_report_success(self):
+        source = np.full((24, 32, 3), 127, dtype=np.uint8)
+        with tempfile.TemporaryDirectory(dir=PROJECT_DIR) as temp_dir, patch.object(
+            main, "_append_capture_manifest", side_effect=OSError("模擬清冊寫入失敗")
+        ), patch.object(main, "write_report") as report_mock:
+            result = main.save_legal_screenshot(
+                source, temp_dir, "2026/03/26 17:37:28.123", ["ID:1 car"], "video"
+            )
+
+        self.assertIsNone(result)
+        self.assertTrue(any("清冊寫入失敗" in call.args[0] for call in report_mock.call_args_list))
+
+    def test_capture_write_failure_is_not_reported_as_success(self):
+        state = {
+            "is_moving": True,
+            "best_frame": Mock(),
+            "best_timecode": "00:00:01.000",
+            "best_summary": ["ID:1 car"],
+            "best_target_info": {},
+            "last_frame": Mock(),
+            "last_timecode": "00:00:02.000",
+            "last_target_info": {},
+            "class_name": "car",
+        }
+        receiver = Mock()
+        with patch.object(main, "save_legal_screenshot", return_value=None), patch.object(main, "eel", receiver):
+            main._flush_all_track_states(
+                {1: state}, "雙格蒐證模式 (起點+最清晰)", "out", "video"
+            )
+
+        receiver.appendLog.assert_called_once()
+        self.assertEqual(receiver.appendLog.call_args.args[1], "error")
+        self.assertIn("失敗", receiver.appendLog.call_args.args[0])
+
+    def test_safe_base64_decode_validates_input_length_and_prefix(self):
+        data, err = main.safe_base64_decode("data:image/png;base64,aGVsbG8=")
+        self.assertIsNone(err)
+        self.assertEqual(data, b"hello")
+
+        data, err = main.safe_base64_decode("aGVsbG8")  # 無 padding 情況
+        self.assertIsNone(err)
+        self.assertEqual(data, b"hello")
+
+        _, err = main.safe_base64_decode("a" * 100, max_bytes=50)
+        self.assertIn("超出安全容量", err)
+
+        _, err = main.safe_base64_decode(12345)
+        self.assertIn("非字串格式", err)
+
+    def test_start_eel_app_supports_port_fallback(self):
+        attempts = []
+
+        def fake_eel_start(filename, port=8000, **_kwargs):
+            attempts.append(port)
+            if port == 8000:
+                raise OSError("[Errno 10048] address already in use")
+
+        with patch.object(main.eel, "init"), patch.object(main.eel, "start", side_effect=fake_eel_start):
+            main.start_eel_app()
+
+        self.assertEqual(attempts, [8000, 8001])
+
 
 if __name__ == "__main__":
     unittest.main()
