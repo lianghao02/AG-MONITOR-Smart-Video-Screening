@@ -46,6 +46,8 @@ python-embed\python.exe -B tests\test_real_videos.py -v
 - **OpenCV Contrib** (Bilateral Filter 降噪與 ESPCN 影像超解析引擎)
 - **Eel** (輕量化 WebSocket 前後端通訊與現代化 UI 渲染)
 
+後續功能規劃與實作紀錄請參閱 [`docs/FUTURE_ROADMAP.md`](docs/FUTURE_ROADMAP.md) 與 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)。
+
 ## v3.0.1 安全與驗證補充
 
 - 截圖採零覆寫命名，並將容量、SHA-256、時間碼與目標寫入 `鑑識截圖清冊.jsonl`。
