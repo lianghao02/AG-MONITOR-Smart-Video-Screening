@@ -1,4 +1,13 @@
-# AG-MONITOR 科技偵查・智慧雙軌鑑識工作站 v3.0.1
+# AG-MONITOR 科技偵查・智慧雙軌鑑識工作站 v3.1.0
+
+## 下載、依賴與啟動
+
+- **系統**：Windows 10/11；主要開發版本為 Python 3.13。
+- **核心套件**：PyAV、Eel、OpenCV、Ultralytics YOLO、lap；完整固定版本見 `requirements.txt`，可攜版補充套件見 `portable-requirements.txt`。
+- **推薦啟動**：下載並解壓完整專案後雙擊 `RUN.bat`。若沒有 Python，`setup_and_run.ps1` 會建立專案內的 `python_embed` 並安裝依賴。
+- **手動安裝**：`py -3.13 -m venv .venv`，啟用後執行 `python -m pip install -r requirements.txt`，再執行 `python main.py`。
+- **網路需求**：首次建立環境、安裝套件或下載 YOLO／Real-ESRGAN 模型時需要網路；已備妥 `python_embed`、套件與模型後可離線啟動。
+- **打包／移機**：保留完整專案與已建好的 `python_embed`；不要只複製 `main.py`。模型與證物資料不應提交至 GitHub。
 
 ## 專案簡介
 專為台灣警務鑑識實戰設計，通吃 `.h265`, `.dav`, `.264`, `.avi` 等極端監視器裸流的無損戰術播放器；並結合雙模態 AI 蒐證追蹤，與針對「文字車牌 / 人像五官」自適應降噪超解析的數位照片修復工作站。
@@ -20,10 +29,10 @@
 python main.py
 ```
 
-`RUN.bat` 會優先驗證專案 `.venv` 的固定套件版本，無可用系統 Python 時才切換至 `python-embed`。僅檢查環境、不開啟介面可執行：
+`RUN.bat` 會使用專案自己的 `python_embed`。僅建置／檢查環境、不開啟介面可執行：
 
 ```bat
-RUN.bat --verify-only
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup_and_run.ps1 -NoLaunch
 ```
 
 ## 鑑識可追溯性
@@ -35,9 +44,9 @@ RUN.bat --verify-only
 將測試影片放入被 Git 忽略的 `input_videos/`，再以可攜核心執行：
 
 ```bat
-python-embed\python.exe -B tests\test_forensic_core.py -v
-python-embed\python.exe -B tests\test_process_context.py -v
-python-embed\python.exe -B tests\test_real_videos.py -v
+python_embed\python.exe -B tests\test_forensic_core.py -v
+python_embed\python.exe -B tests\test_process_context.py -v
+python_embed\python.exe -B tests\test_real_videos.py -v
 ```
 
 ## 技術棧
@@ -48,7 +57,7 @@ python-embed\python.exe -B tests\test_real_videos.py -v
 
 後續功能規劃與實作紀錄請參閱 [`docs/FUTURE_ROADMAP.md`](docs/FUTURE_ROADMAP.md) 與 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)。
 
-## v3.0.1 安全與驗證補充
+## v3.1.0 安全與驗證補充
 
 - 截圖採零覆寫命名，並將容量、SHA-256、時間碼與目標寫入 `鑑識截圖清冊.jsonl`。
 - Base64 影像輸入設有型別、格式及容量限制；寫檔失敗時不會回報成功。

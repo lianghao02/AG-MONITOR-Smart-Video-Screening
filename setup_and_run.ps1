@@ -15,10 +15,10 @@ $embedPython = Join-Path $embedDir 'python.exe'
 # 判定進入點檔案
 $entryPoint = if (Test-Path -LiteralPath (Join-Path $projectDir 'main.py')) {
     'main.py'
-} elseif (Test-Path -LiteralPath (Join-Path $projectDir 'app.py')) {
-    'app.py'
 } elseif (Test-Path -LiteralPath (Join-Path $projectDir 'ui.py')) {
     'ui.py'
+} elseif (Test-Path -LiteralPath (Join-Path $projectDir 'app.py')) {
+    'app.py'
 } else {
     'main.py'
 }
