@@ -4,6 +4,7 @@ __pycache__/
 debug.log
 .antigravity/
 python-embed/
+python_embed/
 
 # AI 權重與模型檔案
 *.pt
