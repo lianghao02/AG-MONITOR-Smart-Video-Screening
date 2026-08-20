@@ -2,205 +2,694 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AG-MONITOR 科技偵查戰術播放器</title>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script type="text/javascript" src="/eel.js"></script>
     <style>
-        /* CSS reset and base */
+        /* ==========================================================================
+           莫蘭迪設計系統 (Morandi Design System) - AG-MONITOR v3.5
+           ========================================================================== */
         * { box-sizing: border-box; margin: 0; padding: 0; }
+        
+        :root {
+            /* 莫蘭迪核心底色與表面色 */
+            --morandi-bg-app: #ECEEEF;
+            --morandi-bg-panel: #F5F7F8;
+            --morandi-bg-card: #FFFFFF;
+            --morandi-bg-subtle: #E3E8EC;
+            --morandi-bg-hover: #D8E0E6;
+            
+            /* 莫蘭迪主品牌色 (鼠尾草灰綠 Sage Green) */
+            --morandi-sage: #52745F;
+            --morandi-sage-hover: #43604E;
+            --morandi-sage-soft: #E8EFEA;
+            --morandi-sage-border: #A3BDAD;
+            
+            /* 莫蘭迪次主色 (霧霾藍灰 Slate Blue) */
+            --morandi-slate: #5B728D;
+            --morandi-slate-hover: #4A5F77;
+            --morandi-slate-soft: #EBF0F6;
+            --morandi-slate-border: #B0C2D4;
+            
+            /* 莫蘭迪警示/磚紅 (Terracotta / Rose) */
+            --morandi-rose: #B86B65;
+            --morandi-rose-hover: #9F5752;
+            --morandi-rose-soft: #F9ECEB;
+            --morandi-rose-border: #DCB2AE;
+            
+            /* 莫蘭迪暖砂/琥珀 (Amber Sand) */
+            --morandi-amber: #BA8759;
+            --morandi-amber-hover: #A47348;
+            --morandi-amber-soft: #FAF3EB;
+            --morandi-amber-border: #DBC5AF;
+            
+            /* 莫蘭迪陶土棕灰 (Clay) */
+            --morandi-clay: #8A7B70;
+            --morandi-clay-soft: #EFECE9;
+            
+            /* 邊框與分隔線 */
+            --morandi-border: #D4DCE3;
+            --morandi-border-light: #E6ECF0;
+            
+            /* 沉穩文字階層 (高可讀性、低眼壓) */
+            --text-primary: #273240;
+            --text-secondary: #5C6A7B;
+            --text-muted: #8B98A7;
+            --text-inverse: #FFFFFF;
+            
+            /* 柔和陰影系統 */
+            --shadow-sm: 0 1px 3px rgba(39, 50, 64, 0.05), 0 1px 2px rgba(39, 50, 64, 0.03);
+            --shadow-md: 0 4px 10px rgba(39, 50, 64, 0.07);
+            --shadow-lg: 0 12px 24px -4px rgba(39, 50, 64, 0.12);
+            --radius-sm: 4px;
+            --radius-md: 8px;
+            --radius-lg: 12px;
+            --radius-pill: 24px;
+        }
+
         html, body { 
             height: 100vh; 
             width: 100vw;
             overflow: hidden; 
-            background-color: #F3F5F8;
-            color: #2B364B;
-            font-family: "Microsoft JhengHei", "Segoe UI", system-ui, sans-serif;
+            background-color: var(--morandi-bg-app);
+            color: var(--text-primary);
+            font-family: "Microsoft JhengHei", "Segoe UI", -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
             display: flex;
             flex-direction: column;
+            -webkit-font-smoothing: antialiased;
         }
 
-        /* Variables */
-        :root {
-            --bg-dark: #F3F5F8;
-            --bg-panel: rgba(255, 255, 255, 0.9);
-            --border-color: rgba(107, 139, 176, 0.24);
-            --accent-green: #52745F;
-            --accent-blue: #526F94;
-            --text-main: #2B364B;
-            --text-muted: #667080;
-            --shadow: 0 8px 30px rgba(160, 175, 195, 0.12);
+        /* 滾動條美化 (莫蘭迪風格) */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: var(--morandi-bg-panel); }
+        ::-webkit-scrollbar-thumb { background: #CCD5DE; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #B3C0CC; }
+
+        /* ==========================================================================
+           頂部全局導航 (Global Tab Bar)
+           ========================================================================== */
+        .global-tab-bar {
+            height: 44px;
+            background: #FFFFFF;
+            border-bottom: 1px solid var(--morandi-border);
+            display: flex;
+            align-items: center;
+            padding: 0 16px;
+            flex-shrink: 0;
+            box-shadow: var(--shadow-sm);
+            z-index: 100;
+        }
+        .global-tab-brand {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-weight: bold;
+            font-size: 14px;
+            color: var(--morandi-slate);
+            margin-right: 24px;
+            padding-right: 16px;
+            border-right: 1px solid var(--morandi-border-light);
+        }
+        .global-tab-brand i { color: var(--morandi-sage); font-size: 16px; }
+        .global-tab-btn {
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            padding: 0 16px;
+            height: 44px;
+            cursor: pointer;
+            font-size: 13.5px;
+            font-weight: 600;
+            outline: none;
+            transition: all 0.2s ease;
+            border-bottom: 3px solid transparent;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .global-tab-btn:hover { color: var(--text-primary); background: var(--morandi-bg-panel); }
+        .global-tab-btn.active {
+            color: var(--morandi-sage);
+            border-bottom-color: var(--morandi-sage);
+            background: var(--morandi-sage-soft);
+        }
+        .global-tab-help {
+            margin-left: auto;
+            color: var(--morandi-slate);
+            background: var(--morandi-slate-soft);
+            border: 1px solid var(--morandi-slate-border);
+            padding: 6px 12px;
+            border-radius: var(--radius-pill);
+            font-size: 12.5px;
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-weight: 600;
+            transition: 0.2s;
+        }
+        .global-tab-help:hover {
+            background: var(--morandi-slate);
+            color: #FFFFFF;
         }
 
-        /* Layout */
+        /* 視圖切換容器 */
+        .main-view {
+            display: none;
+            flex-grow: 1;
+            height: calc(100vh - 44px);
+            overflow: hidden;
+            position: relative;
+        }
+        .main-view.active { display: flex; }
+
+        /* ==========================================================================
+           左側設定面板 (Card-based Layout)
+           ========================================================================== */
         .panel-left {
-            width: 350px;
+            width: 360px;
             height: 100%;
-            background-color: var(--bg-panel);
-            border-right: 1px solid var(--border-color);
+            background-color: var(--morandi-bg-panel);
+            border-right: 1px solid var(--morandi-border);
             display: flex;
             flex-direction: column;
             overflow-y: auto;
+            flex-shrink: 0;
+            gap: 12px;
+            padding: 12px;
+        }
+
+        /* Logo 區塊 */
+        .logo-container {
+            background: var(--morandi-bg-card);
+            border: 1px solid var(--morandi-border);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            text-align: center;
+            flex-shrink: 0;
+            box-shadow: var(--shadow-sm);
+        }
+
+        /* 卡片容器 */
+        .card-section {
+            background: var(--morandi-bg-card);
+            border: 1px solid var(--morandi-border);
+            border-radius: var(--radius-md);
+            padding: 12px;
+            flex-shrink: 0;
+            box-shadow: var(--shadow-sm);
+            transition: box-shadow 0.2s ease, border-color 0.2s ease;
+        }
+        .card-section:hover { box-shadow: var(--shadow-md); }
+        .card-section.drag-highlight {
+            border-color: var(--morandi-sage);
+            background: var(--morandi-sage-soft);
+        }
+
+        .card-title {
+            color: var(--morandi-slate);
+            font-weight: 700;
+            font-size: 13px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            letter-spacing: 0.3px;
+        }
+        .card-badge {
+            background: var(--morandi-slate-soft);
+            color: var(--morandi-slate);
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            font-size: 11px;
+            font-weight: 700;
+        }
+        .card-subhint {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-left: auto;
+            font-weight: normal;
+        }
+
+        /* 按鈕系統 (Morandi Button System) */
+        .btn-group { display: flex; gap: 6px; }
+        .btn {
+            background-color: var(--morandi-bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--morandi-border);
+            padding: 7px 12px;
+            cursor: pointer;
+            border-radius: var(--radius-sm);
+            font-size: 12.5px;
+            font-weight: 600;
+            flex-grow: 1;
+            text-align: center;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 5px;
+        }
+        .btn:hover {
+            background-color: var(--morandi-bg-subtle);
+            border-color: #B9C4CE;
+            color: var(--text-primary);
+        }
+        .btn-default {
+            background-color: var(--morandi-bg-card);
+            color: var(--text-secondary);
+        }
+        .btn-primary-ghost {
+            border-color: var(--morandi-sage-border);
+            color: var(--morandi-sage);
+            background: var(--morandi-sage-soft);
+        }
+        .btn-primary-ghost:hover {
+            background: var(--morandi-sage);
+            color: #FFFFFF;
+        }
+        .btn-start {
+            background: linear-gradient(135deg, #52745F, #456351);
+            border-color: #43604E;
+            color: #FFFFFF;
+            font-size: 14px;
+            font-weight: 700;
+            box-shadow: 0 2px 6px rgba(82, 116, 95, 0.25);
+        }
+        .btn-start:hover {
+            background: linear-gradient(135deg, #476553, #3A5344);
+            box-shadow: 0 4px 10px rgba(82, 116, 95, 0.35);
+            color: #FFFFFF;
+        }
+        .btn-stop {
+            background: linear-gradient(135deg, #B86B65, #A25954);
+            border-color: #9F5752;
+            color: #FFFFFF;
+            font-size: 14px;
+            font-weight: 700;
+            box-shadow: 0 2px 6px rgba(184, 107, 101, 0.25);
+        }
+        .btn-stop:hover {
+            background: linear-gradient(135deg, #A45953, #8F4944);
+            box-shadow: 0 4px 10px rgba(184, 107, 101, 0.35);
+            color: #FFFFFF;
+        }
+        .btn-folder {
+            background-color: var(--morandi-amber-soft);
+            color: var(--morandi-amber);
+            border-color: var(--morandi-amber-border);
+        }
+        .btn-folder:hover {
+            background-color: var(--morandi-amber);
+            color: #FFFFFF;
+        }
+
+        /* 下拉選單與輸入控制 */
+        .morandi-select {
+            width: 100%;
+            background: #FFFFFF;
+            color: var(--text-primary);
+            border: 1px solid var(--morandi-border);
+            border-radius: var(--radius-sm);
+            padding: 7px 10px;
+            font-size: 12.5px;
+            outline: none;
+            transition: border-color 0.2s ease;
+        }
+        .morandi-select:focus {
+            border-color: var(--morandi-slate);
+            box-shadow: 0 0 0 2px rgba(91, 114, 141, 0.15);
+        }
+        .form-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+            display: block;
+        }
+
+        /* 滑桿控制器 (Morandi Sliders) */
+        .slider-group { margin-top: 8px; }
+        .slider-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-secondary);
+            margin-bottom: 4px;
+        }
+        .highlight-val {
+            background: var(--morandi-sage-soft);
+            color: var(--morandi-sage);
+            padding: 2px 7px;
+            border-radius: var(--radius-sm);
+            font-weight: 700;
+            font-size: 12px;
+        }
+        .highlight-val.amber {
+            background: var(--morandi-amber-soft);
+            color: var(--morandi-amber);
         }
         
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 6px;
+            border-radius: 3px;
+            background: var(--morandi-bg-subtle);
+            outline: none;
+            margin: 6px 0;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: var(--morandi-sage);
+            border: 2px solid #FFFFFF;
+            cursor: pointer;
+            box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+            transition: transform 0.1s;
+        }
+        input[type=range]::-webkit-slider-thumb:hover { transform: scale(1.15); }
+
+        /* 核取方塊群組 (Checkboxes) */
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .checkbox-label {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 12px;
+            color: var(--text-primary);
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: var(--radius-sm);
+            transition: background 0.15s;
+            user-select: none;
+        }
+        .checkbox-label:hover { background: var(--morandi-bg-subtle); }
+        .checkbox-label input[type=checkbox] {
+            accent-color: var(--morandi-sage);
+            cursor: pointer;
+        }
+        .switch-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+            font-size: 12.5px;
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+        .switch-row input[type=checkbox] {
+            accent-color: var(--morandi-sage);
+            cursor: pointer;
+        }
+
+        /* 底部資訊 */
+        .footer-info {
+            margin-top: auto;
+            padding: 10px;
+            text-align: center;
+            font-size: 11px;
+            color: var(--text-muted);
+            border-top: 1px solid var(--morandi-border);
+            background: var(--morandi-bg-card);
+            border-radius: var(--radius-md);
+        }
+        .footer-info a {
+            color: var(--morandi-sage);
+            text-decoration: none;
+            font-weight: bold;
+        }
+
+        /* 抽屜證物清單 (Queue Drawer) */
+        .queue-drawer {
+            position: absolute;
+            top: 0;
+            left: -360px;
+            width: 340px;
+            height: 100%;
+            background: #FFFFFF;
+            border-right: 1px solid var(--morandi-border);
+            box-shadow: var(--shadow-lg);
+            z-index: 1005;
+            transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            display: flex;
+            flex-direction: column;
+            padding: 16px;
+        }
+        .queue-drawer.open { left: 0; }
+        .drawer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--morandi-slate);
+            font-weight: 700;
+            font-size: 14px;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--morandi-border-light);
+        }
+        .drawer-close-btn {
+            background: var(--morandi-bg-panel);
+            border: 1px solid var(--morandi-border);
+            color: var(--text-secondary);
+            width: 28px;
+            height: 28px;
+            border-radius: 50%;
+            font-size: 12px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: 0.2s;
+        }
+        .drawer-close-btn:hover { background: var(--morandi-rose-soft); color: var(--morandi-rose); }
+        .queue-box {
+            flex-grow: 1;
+            overflow-y: auto;
+            background: var(--morandi-bg-panel);
+            border: 1px solid var(--morandi-border);
+            border-radius: var(--radius-sm);
+            padding: 6px;
+        }
+        .queue-item {
+            padding: 8px 10px;
+            border-bottom: 1px solid var(--morandi-border-light);
+            font-size: 12px;
+            color: var(--text-primary);
+            border-radius: var(--radius-sm);
+            cursor: pointer;
+            transition: background 0.15s;
+        }
+        .queue-item:hover { background: var(--morandi-sage-soft); color: var(--morandi-sage); font-weight: 600; }
+
+        /* ==========================================================================
+           右側主顯示區與播放器 (Right Panel & Player)
+           ========================================================================== */
         .panel-right {
             flex-grow: 1;
             height: 100%;
             display: flex;
             flex-direction: column;
-            background-color: var(--bg-dark);
+            background-color: var(--morandi-bg-app);
             position: relative;
+            overflow: hidden;
         }
 
-        /* Left Panel Sections */
-        .logo-container {
-            padding: 10px;
-            border-bottom: 1px solid var(--border-color);
-            text-align: center;
-            flex-shrink: 0;
-        }
-        
-        .section {
-            padding: 15px;
-            border-bottom: 1px solid var(--border-color);
-            flex-shrink: 0;
-        }
-        .section-title {
-            color: var(--accent-green);
-            font-weight: bold;
-            margin-bottom: 10px;
-            font-size: 14px;
-        }
-        
-        .queue-section {
-            display: flex;
-            flex-direction: column;
-        }
-        .queue-box {
-            flex-grow: 1;
-            overflow-y: auto;
-            background: rgba(255, 255, 255, 0.75);
-            border: 1px solid var(--border-color);
-            margin-top: 10px;
-            padding: 5px;
-        }
-        .queue-item {
-            padding: 5px;
-            border-bottom: 1px solid var(--border-color);
-            font-size: 13px;
-        }
-
-        /* Form elements */
-        .btn-group { display: flex; gap: 5px; }
-        .btn {
-            background-color: #E8EDF3;
-            color: var(--text-main);
-            border: 1px solid var(--border-color);
-            padding: 6px 12px;
-            cursor: pointer;
-            border-radius: 4px;
-            font-size: 13px;
-            flex-grow: 1;
-            text-align: center;
-            transition: 0.2s;
-        }
-        .btn:hover { background-color: #DCE5EF; }
-        .btn-start { background-color: var(--accent-blue); border-color: #58789A; color: #fff; }
-        .btn-start:hover { background-color: #58789A; }
-        .btn-stop { background-color: #D9383A; border-color: #A32A2B; }
-        .btn-stop:hover { background-color: #A32A2B; }
-        .btn-active { background-color: var(--accent-green); color: black; font-weight: bold; }
-
-        input[type=range] { width: 100%; margin-top: 5px; }
-        .slider-header { display: flex; justify-content: space-between; font-size: 12px; }
-        .highlight-val { color: var(--accent-green); }
-        
-        .cyber-select {
-            width: 100%;
-            background: rgba(255, 255, 255, 0.9);
-            color: var(--text-main);
-            border: 1px solid var(--border-color);
-            padding: 5px;
-        }
-
-        /* Right Panel */
-        /* Top Mode Switcher */
+        /* 雙模態切換膠囊 (Segmented Mode Switcher) */
         .mode-switcher-bar {
-            height: 50px;
-            background: rgba(255, 255, 255, 0.82);
-            border-bottom: 1px solid var(--border-color);
+            height: 48px;
+            background: #FFFFFF;
+            border-bottom: 1px solid var(--morandi-border);
             display: flex;
             align-items: center;
             justify-content: center;
-            gap: 20px;
+            padding: 0 16px;
+            flex-shrink: 0;
+        }
+        .mode-segmented-control {
+            background: var(--morandi-bg-panel);
+            border: 1px solid var(--morandi-border);
+            border-radius: var(--radius-pill);
+            padding: 3px;
+            display: inline-flex;
+            gap: 4px;
         }
         .mode-btn {
-            padding: 8px 20px;
-            background: rgba(255, 255, 255, 0.78);
-            border: 1px solid var(--border-color);
-            color: var(--text-muted);
-            border-radius: 20px;
+            padding: 6px 18px;
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            border-radius: var(--radius-pill);
             cursor: pointer;
-            font-size: 15px;
-            font-weight: bold;
-            transition: all 0.3s;
+            font-size: 13px;
+            font-weight: 700;
+            transition: all 0.2s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
+        .mode-btn:hover { color: var(--text-primary); }
         .mode-btn.active {
-            background: rgba(110, 156, 131, 0.12);
-            color: var(--accent-green);
-            border-color: var(--accent-green);
-            box-shadow: 0 0 10px rgba(110, 156, 131, 0.22);
+            background: #FFFFFF;
+            color: var(--morandi-sage);
+            box-shadow: var(--shadow-sm);
         }
 
-        /* Canvas Area */
+        /* 畫布視訊區 */
         .canvas-wrapper {
             flex-grow: 1;
             display: flex;
             align-items: center;
             justify-content: center;
-            background: #000;
+            background: #181C22;
             position: relative;
             overflow: hidden;
+            transition: background-color 0.2s ease;
         }
+        .canvas-wrapper.drag-active {
+            background: #20272E;
+        }
+        
+        /* 拖曳全畫布遮罩反饋 (Drag & Drop Overlay) */
+        .drag-drop-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(82, 116, 95, 0.88);
+            backdrop-filter: blur(6px);
+            z-index: 1000;
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #FFFFFF;
+            border: 3px dashed #E8EFEA;
+            border-radius: var(--radius-md);
+            pointer-events: none;
+            animation: fadeIn 0.15s ease-out;
+        }
+        .drag-drop-overlay i {
+            font-size: 48px;
+            margin-bottom: 16px;
+            color: #E8EFEA;
+        }
+        .drag-drop-overlay h3 {
+            font-size: 18px;
+            font-weight: 700;
+            margin-bottom: 6px;
+        }
+        .drag-drop-overlay p {
+            font-size: 13px;
+            color: #D4E3D8;
+        }
+
         #previewCanvas {
             max-width: 100%;
             max-height: 100%;
             object-fit: contain;
+            box-shadow: 0 0 20px rgba(0,0,0,0.5);
         }
-        .placeholder-text {
+        
+        /* 現代莫蘭迪空狀態卡片 (Empty State) */
+        .placeholder-card {
             position: absolute;
-            color: #555;
+            background: rgba(28, 33, 40, 0.95);
+            border: 1px solid rgba(212, 220, 227, 0.15);
+            border-radius: var(--radius-lg);
+            padding: 24px 32px;
+            max-width: 520px;
             text-align: center;
-            line-height: 1.5;
+            box-shadow: var(--shadow-lg);
+            backdrop-filter: blur(8px);
+            cursor: pointer;
+            transition: transform 0.2s ease, border-color 0.2s ease;
         }
-        .placeholder-text::before {
-            content: "";
-            display: block;
-            width: 46px;
-            height: 46px;
-            margin: 0 auto 10px;
-            opacity: .8;
-            background: center / contain no-repeat url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect x='9' y='14' width='46' height='35' rx='7' fill='%23E8EDF3' stroke='%236B8BB0' stroke-width='3'/%3E%3Cpath d='m25 25 17 7-17 7z' fill='%236B8BB0'/%3E%3Ccircle cx='47' cy='20' r='4' fill='%236E9C83'/%3E%3C/svg%3E");
+        .placeholder-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(82, 116, 95, 0.4);
+        }
+        .placeholder-icon {
+            width: 52px;
+            height: 52px;
+            background: rgba(82, 116, 95, 0.15);
+            border: 1px solid rgba(82, 116, 95, 0.35);
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            color: #7EABA0;
+            font-size: 22px;
+            margin-bottom: 12px;
+        }
+        .placeholder-title {
+            color: #E2E8F0;
+            font-size: 15px;
+            font-weight: 700;
+            margin-bottom: 12px;
+            letter-spacing: 0.5px;
+        }
+        .placeholder-steps {
+            text-align: left;
+            font-size: 12.5px;
+            color: #94A3B8;
+            line-height: 1.8;
+            margin-bottom: 8px;
+        }
+        .placeholder-steps li {
+            margin-bottom: 4px;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }
+        .placeholder-steps .badge-step {
+            background: rgba(91, 114, 141, 0.25);
+            color: #9DB4CC;
+            border-radius: 3px;
+            padding: 1px 5px;
+            font-size: 11px;
+            font-weight: 700;
         }
 
-        /* Player Controls (PotPlayer Style) */
+        /* 播放器控制列 (Player Controls) */
         .player-controls {
-            background: rgba(255, 255, 255, 0.88);
-            border-top: 1px solid var(--border-color);
-            padding: 10px;
+            background: #FFFFFF;
+            border-top: 1px solid var(--morandi-border);
+            padding: 10px 16px;
             display: flex;
             flex-direction: column;
             gap: 8px;
+            box-shadow: var(--shadow-sm);
         }
-        /* Seek Bar */
         .timeline-container {
             display: flex;
             align-items: center;
-            gap: 10px;
+            gap: 12px;
         }
-        .time-display { font-family: monospace; font-size: 13px; color: var(--accent-green); width: 140px; text-align: center;}
+        .time-display {
+            font-family: Consolas, monospace;
+            font-size: 13px;
+            font-weight: 700;
+            color: var(--morandi-sage);
+            background: var(--morandi-sage-soft);
+            padding: 3px 8px;
+            border-radius: var(--radius-sm);
+            width: 150px;
+            text-align: center;
+        }
         #timeline { flex-grow: 1; cursor: pointer; }
 
-        /* Buttons Row */
         .control-row {
             display: flex;
             align-items: center;
@@ -208,420 +697,549 @@
         }
         .control-group {
             display: flex;
-            gap: 5px;
+            align-items: center;
+            gap: 6px;
         }
         .icon-btn {
-            background: transparent;
-            border: 1px solid transparent;
-            color: #CCC;
-            font-size: 16px;
-            width: 36px;
-            height: 36px;
+            background: var(--morandi-bg-panel);
+            border: 1px solid var(--morandi-border);
+            color: var(--text-secondary);
+            font-size: 14px;
+            width: 34px;
+            height: 34px;
             cursor: pointer;
-            border-radius: 4px;
-            transition: 0.2s;
+            border-radius: var(--radius-sm);
+            transition: all 0.15s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
         }
-        .icon-btn:hover { background: #E8EDF3; color: var(--text-main); }
+        .icon-btn:hover {
+            background: var(--morandi-slate-soft);
+            color: var(--morandi-slate);
+            border-color: var(--morandi-slate-border);
+        }
         .speed-btn {
-            background: #E8EDF3;
-            border: 1px solid var(--border-color);
-            color: var(--text-main);
-            padding: 4px 8px;
+            background: var(--morandi-bg-panel);
+            border: 1px solid var(--morandi-border);
+            color: var(--text-secondary);
+            padding: 5px 10px;
             cursor: pointer;
-            border-radius: 4px;
+            border-radius: var(--radius-sm);
             font-size: 12px;
-            font-weight: bold;
+            font-weight: 700;
+            transition: all 0.15s ease;
         }
+        .speed-btn:hover { background: var(--morandi-bg-subtle); }
         .speed-btn.active {
-            background: var(--accent-blue);
-            color: white;
-            border-color: var(--accent-blue);
+            background: var(--morandi-slate);
+            color: #FFFFFF;
+            border-color: var(--morandi-slate);
         }
 
-        /* Bottom Log Area */
+        /* 底部日誌與進度區 (Log & Status Bar) */
         .log-wrapper {
-            height: 200px;
-            background: rgba(255, 255, 255, 0.88);
-            border-top: 1px solid var(--border-color);
+            height: 180px;
+            background: #FFFFFF;
+            border-top: 1px solid var(--morandi-border);
             display: flex;
             flex-direction: column;
+            flex-shrink: 0;
         }
         .status-bar {
-            padding: 5px 10px;
-            background: #EDF2F5;
-            border-bottom: 1px solid var(--border-color);
+            padding: 6px 14px;
+            background: var(--morandi-bg-panel);
+            border-bottom: 1px solid var(--morandi-border-light);
             display: flex;
             justify-content: space-between;
-            font-size: 13px;
+            align-items: center;
+            font-size: 12.5px;
+            font-weight: 600;
         }
-        .status-ok { color: var(--accent-green); }
-        .status-warn { color: #FFCC00; }
-        .status-danger { color: #FF4444; }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 2px 8px;
+            border-radius: var(--radius-pill);
+            font-size: 12px;
+        }
+        .status-ok { background: var(--morandi-sage-soft); color: var(--morandi-sage); }
+        .status-warn { background: var(--morandi-amber-soft); color: var(--morandi-amber); }
+        .status-danger { background: var(--morandi-rose-soft); color: var(--morandi-rose); }
         
         .log-box {
             flex-grow: 1;
             overflow-y: auto;
-            padding: 10px;
-            font-family: monospace;
+            padding: 10px 14px;
+            font-family: Consolas, "Courier New", monospace;
             font-size: 12px;
-            line-height: 1.4;
+            line-height: 1.5;
+            background: #FFFFFF;
         }
-        .log-entry.info { color: #CCC; }
-        .log-entry.success { color: var(--accent-green); }
-        .log-entry.warn { color: #FFCC00; }
-        .log-entry.error { color: #FF4444; }
+        .log-entry { margin-bottom: 3px; }
+        .log-entry.info { color: var(--text-secondary); }
+        .log-entry.success { color: var(--morandi-sage); font-weight: 600; }
+        .log-entry.warn { color: var(--morandi-amber); font-weight: 600; }
+        .log-entry.error { color: var(--morandi-rose); font-weight: 600; }
 
-        .hidden { display: none !important; }
-
-        /* Global Tab Bar */
-        .global-tab-bar {
-            height: 40px;
-            background: #EDF2F5;
-            border-bottom: 1px solid var(--border-color);
-            display: flex;
-            align-items: center;
-            padding: 0 10px;
-            flex-shrink: 0;
+        /* 進度條組件 */
+        #unifiedProgressContainer {
+            padding: 8px 14px;
+            background: var(--morandi-bg-panel);
+            border-bottom: 1px solid var(--morandi-border-light);
         }
-        .global-tab-btn {
-            background: transparent;
-            color: var(--text-muted);
-            border: none;
-            padding: 10px 20px;
-            cursor: pointer;
-            font-size: 14px;
-            font-weight: bold;
-            outline: none;
-            transition: 0.3s;
-            border-bottom: 2px solid transparent;
-        }
-        .global-tab-btn:hover { color: white; }
-        .global-tab-btn.active {
-            color: var(--accent-green);
-            border-bottom: 2px solid var(--accent-green);
-            text-shadow: 0 0 5px rgba(0,255,102,0.5);
-        }
-
-        .main-view {
-            display: none;
-            flex-grow: 1;
-            height: calc(100vh - 40px);
+        .progress-track {
+            width: 100%;
+            height: 7px;
+            background: var(--morandi-bg-subtle);
+            border-radius: 4px;
             overflow: hidden;
-            position: relative;
         }
-        .main-view.active {
-            display: flex;
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #52745F, #6F967E);
+            transition: width 0.15s ease-out;
+            border-radius: 4px;
         }
+        .workflow-card { background: var(--morandi-sage-soft); border: 1px solid var(--morandi-sage-border); }
+        .workflow-note { color: var(--text-secondary); font-size: 12px; line-height: 1.55; margin: 6px 0 10px; }
+        .preset-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+        .preset-btn { border: 1px solid var(--morandi-border); background: #fff; color: var(--text-primary); border-radius: var(--radius-sm); padding: 7px 4px; font-size: 11px; cursor: pointer; }
+        .preset-btn:hover, .preset-btn:focus { border-color: var(--morandi-sage); background: var(--morandi-sage-soft); }
+        .advanced-settings { margin-bottom: 10px; }
+        .advanced-settings summary { cursor: pointer; color: var(--morandi-slate); font-size: 12px; font-weight: 700; padding: 7px 2px; }
+        .analysis-summary { display: none; padding: 8px 14px; background: var(--morandi-sage-soft); border-bottom: 1px solid var(--morandi-sage-border); color: var(--text-primary); font-size: 12px; }
+        .analysis-summary strong { color: var(--morandi-sage); }
 
-        /* SR Workspace */
-        #viewSR { flex-direction: column; background: var(--bg-dark); }
+        /* ==========================================================================
+           照片修復工作區 (SR Workspace)
+           ========================================================================== */
+        #viewSR {
+            flex-direction: column;
+            background: var(--morandi-bg-app);
+        }
         .sr-controls {
-            padding: 15px;
-            background: var(--bg-panel);
-            border-bottom: 1px solid var(--border-color);
+            padding: 12px 20px;
+            background: #FFFFFF;
+            border-bottom: 1px solid var(--morandi-border);
             display: flex;
-            gap: 15px;
+            gap: 12px;
             justify-content: center;
             align-items: center;
+            box-shadow: var(--shadow-sm);
         }
-        .sr-controls .btn { max-width: 200px; padding: 10px 20px; font-size: 15px; }
+        .sr-mode-select {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 600;
+            background: var(--morandi-bg-panel);
+            padding: 6px 14px;
+            border-radius: var(--radius-pill);
+            border: 1px solid var(--morandi-border);
+        }
+        .sr-mode-select label {
+            cursor: pointer;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+        }
         .sr-workspace {
             flex-grow: 1;
             display: flex;
             flex-direction: row;
+            gap: 16px;
+            padding: 16px;
             overflow: hidden;
         }
         .sr-panel {
             flex: 1;
             display: flex;
             flex-direction: column;
-            padding: 15px;
-        }
-        .sr-divider {
-            width: 1px;
-            background: var(--accent-green);
-            box-shadow: 0 0 5px rgba(0,255,102,0.5);
+            background: #FFFFFF;
+            border: 1px solid var(--morandi-border);
+            border-radius: var(--radius-md);
+            padding: 14px;
+            box-shadow: var(--shadow-sm);
         }
         .sr-panel-title {
-            color: var(--accent-green);
-            font-weight: bold;
+            color: var(--morandi-slate);
+            font-weight: 700;
             margin-bottom: 10px;
             text-align: center;
-            font-size: 16px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
         }
         .sr-canvas-wrap {
             flex-grow: 1;
-            border: 1px dashed #444;
-            background: #000;
+            border: 1px dashed var(--morandi-border);
+            background: #181C22;
+            border-radius: var(--radius-sm);
             display: flex;
             align-items: center;
             justify-content: center;
             position: relative;
             overflow: hidden;
+            transition: all 0.2s ease;
         }
-        
-        /* Queue Drawer */
-        .queue-drawer {
-            position: absolute;
-            top: 0;
-            left: -350px;
-            width: 320px;
-            height: 100%;
-            background: rgba(20, 20, 20, 0.98);
-            border-right: 2px solid var(--accent-green);
-            box-shadow: 10px 0 20px rgba(0,0,0,0.8);
-            z-index: 1005;
-            transition: left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-            display: flex;
-            flex-direction: column;
-            padding: 15px;
+        .sr-canvas-wrap.drag-active {
+            border-color: var(--morandi-sage);
+            background: rgba(82, 116, 95, 0.1);
         }
-        .queue-drawer.open {
-            left: 0;
-        }
-        .drawer-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            color: var(--accent-green);
-            font-weight: bold;
-            font-size: 15px;
-            margin-bottom: 15px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid var(--border-color);
-        }
-        .drawer-close-btn {
-            background: transparent;
-            border: none;
-            color: #CCC;
-            font-size: 18px;
-            cursor: pointer;
-            transition: 0.2s;
-        }
-        .drawer-close-btn:hover {
-            color: white;
-            transform: scale(1.2);
-        }
+
+        .hidden { display: none !important; }
     </style>
 </head>
 <body>
+    <!-- 全局頂部頁籤欄 -->
     <div class="global-tab-bar">
-        <button id="mainTabPlayer" class="global-tab-btn active" onclick="switchMainTab('player')">👁️ 智慧戰術播放器</button>
-        <button id="mainTabSR" class="global-tab-btn" onclick="switchMainTab('sr')">📸 數位鑑識照片修復</button>
-        <button onclick="document.getElementById('helpModal').style.display='flex'" class="global-tab-btn" style="margin-left:auto; color: var(--accent-blue);"><i class="fas fa-book"></i> 系統操作手冊</button>
+        <div class="global-tab-brand">
+            <i class="fas fa-shield-halved"></i>
+            <span>AG-MONITOR</span>
+        </div>
+        <button id="mainTabPlayer" class="global-tab-btn active" onclick="switchMainTab('player')">
+            <i class="fas fa-video"></i> 智慧戰術播放器
+        </button>
+        <button id="mainTabSR" class="global-tab-btn" onclick="switchMainTab('sr')">
+            <i class="fas fa-wand-magic-sparkles"></i> 數位鑑識照片修復
+        </button>
+        <button onclick="document.getElementById('helpModal').style.display='flex'" class="global-tab-help">
+            <i class="fas fa-book-bookmark"></i> 系統操作手冊
+        </button>
     </div>
 
+    <!-- 主視圖：智慧戰術播放器 -->
     <div id="viewPlayer" class="main-view active">
+        <!-- 左側設定欄 -->
         <div class="panel-left">
-        <div class="logo-container">
-            <svg width="200" height="48" viewBox="0 0 250 60">
-                <polygon points="25,5 55,5 55,30 40,50 25,30" fill="#2A2A2A" stroke="#555555" stroke-width="2"/>
-                <path d="M 15 45 A 25 25 0 0 1 65 -5" fill="none" stroke="#00FF66" stroke-width="1" stroke-dasharray="2,2"/>
-                <path d="M 25 35 A 15 15 0 0 1 55 5" fill="none" stroke="#007ACC" stroke-width="1.5"/>
-                <circle cx="40" cy="20" r="2" fill="#00FF66"/>
-                <text x="75" y="25" fill="#FFFFFF" font-family="Arial" font-size="16" font-weight="bold" font-style="italic">AG-MONITOR</text>
-                <text x="76" y="45" fill="#00FF66" font-family="'Microsoft JhengHei'" font-size="9" font-weight="bold">科技偵查 · 戰術播放器</text>
-            </svg>
-        </div>
-
-        <div class="section queue-section">
-            <div class="section-title">【1. 待處理證物清單】</div>
-            <div class="btn-group" style="margin-bottom: 8px;">
-                <button class="btn btn-default" style="flex:1; font-size:12px; padding: 6px 4px;" onclick="addVideos()">📁 匯入影片</button>
-                <button class="btn btn-default" style="flex:1; font-size:12px; padding: 6px 4px;" onclick="addFolder()">📂 匯入資料夾</button>
-                <button class="btn btn-default" style="flex:1; font-size:12px; padding: 6px 4px;" onclick="batchRename()">🏷️ 校正檔名</button>
-            </div>
-            <div class="btn-group">
-                <button class="btn btn-default" style="flex:2; font-size:12px; padding: 6px 4px; border-color: var(--accent-green); color: var(--accent-green); font-weight: bold;" onclick="toggleQueueDrawer()">📋 監視器清單</button>
-                <button class="btn btn-default" style="flex:1; font-size:12px; padding: 6px 4px;" onclick="clearQueue()">🗑️ 清除</button>
-            </div>
-        </div>
-
-        <div class="section auto-ai-controls">
-            <div class="section-title">【2. 智慧辨識設定】</div>
-            
-            <div style="margin-bottom: 15px;">
-                <label style="font-size:14px; margin-bottom:5px; display:block;">AI 核心大腦 (模型選擇):</label>
-                <select id="aiModel" class="cyber-select" style="margin-bottom: 5px;">
-                    <option value="yolov8n.pt" selected>🏎️ 極速先鋒引擎 (Nano - 速度最快)</option>
-                    <option value="yolov8s.pt">🦅 鷹眼精準引擎 (Small - 遠距/模糊特化)</option>
-                </select>
-                <label style="font-size:14px; margin:10px 0 5px; display:block;">目標追蹤核心:</label>
-                <select id="trackerMode" class="cyber-select">
-                    <option value="bytetrack" selected>ByteTrack（穩定基準）</option>
-                    <option value="botsort_reid">BoT-SORT ReID（實驗性／遮蔽場景）</option>
-                </select>
+            <!-- 品牌標籤 -->
+            <div class="logo-container">
+                <svg width="220" height="38" viewBox="0 0 250 44">
+                    <rect x="5" y="4" width="36" height="36" rx="8" fill="#52745F"/>
+                    <path d="M 15 22 L 23 30 L 33 14" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+                    <text x="52" y="24" fill="#273240" font-family="'Segoe UI', 'Microsoft JhengHei'" font-size="16" font-weight="bold" letter-spacing="0.5">AG-MONITOR</text>
+                    <text x="53" y="38" fill="#5B728D" font-family="'Microsoft JhengHei'" font-size="10" font-weight="bold">科技偵查 · 智慧雙軌鑑識系統</text>
+                </svg>
             </div>
 
-            <div class="slider-group">
-                <div class="slider-header">
-                    <span>AI 靈敏度門檻:</span>
-                    <span id="confVal" class="highlight-val">0.40</span>
+            <div class="card-section workflow-card">
+                <div class="card-title"><span class="card-badge">快速開始</span><span>三步完成分析</span></div>
+                <div class="workflow-note">1. 匯入影片　2. 選擇情境預設　3. 啟動分析。進階設定可依案件需要再展開。</div>
+            </div>
+
+            <!-- 卡片 1: 待處理證物清單 -->
+            <div class="card-section" id="dropCard">
+                <div class="card-title">
+                    <span class="card-badge">1</span>
+                    <span>步驟 1：匯入證物</span>
+                    <span id="queueSummary" class="card-subhint"><i class="fas fa-hand-pointer"></i> 支援拖曳</span>
                 </div>
-                <input type="range" id="confSlider" min="0.10" max="0.90" step="0.01" value="0.40">
-            </div>
-            <div style="display:flex; flex-wrap:wrap; gap:10px; margin-top:10px; font-size:13px;">
-                <label><input type="checkbox" id="cls_person" checked> Person</label>
-                <label><input type="checkbox" id="cls_bicycle" checked> Bicycle</label>
-                <label><input type="checkbox" id="cls_car" checked> Car</label>
-                <label><input type="checkbox" id="cls_motorcycle" checked> Moto</label>
-                <label><input type="checkbox" id="cls_bus" checked> Bus</label>
-                <label><input type="checkbox" id="cls_truck" checked> Truck</label>
-            </div>
-        </div>
-
-        <div class="section auto-ai-controls">
-            <div class="section-title">【3. 無人空景極速調速】</div>
-            <label style="display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:14px; cursor:pointer;">
-                <input type="checkbox" id="fastMode" checked> 啟用極速背景處理 (關閉實時畫面)
-            </label>
-            <label style="display:flex; align-items:center; gap:8px; margin-bottom:10px; font-size:14px; cursor:pointer;">
-                <input type="checkbox" id="filterStationary" checked> 啟用靜止物件過濾 (自動忽略路邊停放車輛)
-            </label>
-            <div class="slider-group">
-                <div class="slider-header">
-                    <span>空景安全閃現跳躍間隔 (秒):</span>
-                    <span id="skipSecVal" class="highlight-val" style="color: #00ffcc;">0.2s [標準安全]</span>
+                <div class="btn-group" style="margin-bottom: 8px;">
+                    <button class="btn btn-default" style="flex:1;" onclick="addVideos()" title="選擇單個或多個視訊檔案"><i class="fas fa-file-video"></i> 匯入影片</button>
+                    <button class="btn btn-default" style="flex:1;" onclick="addFolder()" title="選擇整個資料夾自動掃描"><i class="fas fa-folder-open"></i> 匯入資料夾</button>
+                    <button class="btn btn-default" style="flex:1;" onclick="batchRename()" title="依真實時間碼批量重命名"><i class="fas fa-tag"></i> 校正檔名</button>
                 </div>
-                <input type="range" id="skipSecSlider" min="0.1" max="5.0" step="0.1" value="0.2">
+                <div class="btn-group">
+                    <button class="btn btn-primary-ghost" style="flex:2;" onclick="toggleQueueDrawer()"><i class="fas fa-list-check"></i> 監視器清單</button>
+                    <button class="btn btn-default" style="flex:1;" onclick="clearQueue()"><i class="fas fa-trash-can"></i> 清除</button>
+                </div>
+            </div>
+
+            <!-- 卡片 2: 智慧辨識設定 (自動 AI 模式控制項) -->
+            <div class="card-section auto-ai-controls">
+                <div class="card-title">
+                    <span class="card-badge">2</span>
+                    <span>步驟 2：選擇案件情境與目標</span>
+                </div>
+                <p class="workflow-note"><strong>案件情境</strong>會自動帶入建議設定；只需再勾選本案要找的目標。</p>
+                <div class="preset-grid" aria-label="建議情境預設">
+                    <button type="button" class="preset-btn" onclick="applyPreset('standard')">一般路口</button>
+                    <button type="button" class="preset-btn" onclick="applyPreset('distant')">遠距小目標</button>
+                    <button type="button" class="preset-btn" onclick="applyPreset('occlusion')">遮蔽車流</button>
+                </div>
+                <p id="presetHint" class="workflow-note">目前：一般路口／平衡辨識與速度。</p>
+                
+                <details class="advanced-settings">
+                    <summary>進階微調：辨識精度、速度與追蹤方式</summary>
+                    <div style="margin-bottom: 10px;">
+                    <label class="form-label">辨識模型：</label>
+                    <select id="aiModel" class="morandi-select" style="margin-bottom: 8px;">
+                        <option value="yolov8n.pt" selected>🏎️ 極速先鋒引擎 (Nano - 速度最快)</option>
+                        <option value="yolov8s.pt">🦅 鷹眼精準引擎 (Small - 遠距/模糊特化)</option>
+                    </select>
+                    
+                    <label class="form-label">追蹤與去重方式：</label>
+                    <select id="trackerMode" class="morandi-select" style="margin-bottom: 8px;">
+                        <option value="bytetrack" selected>ByteTrack（穩定基準）</option>
+                        <option value="botsort_reid">BoT-SORT ReID（實驗性／遮蔽場景）</option>
+                    </select>
+
+                    <label class="form-label">辨識精度與速度：</label>
+                    <select id="inferenceSize" class="morandi-select">
+                        <option value="960" selected>🦅 960px 鷹眼高精準 (遠距小目標特化 - 推薦)</option>
+                        <option value="640">🏎️ 640px 標準極速 (順暢低負載)</option>
+                        <option value="1280">🔬 1280px 超高解析 (4K 監視器深度取證)</option>
+                    </select>
+                </div>
+
+                <div class="slider-group">
+                    <div class="slider-header">
+                        <span>AI 靈敏度門檻:</span>
+                        <span id="confVal" class="highlight-val">0.40</span>
+                    </div>
+                    <input type="range" id="confSlider" min="0.10" max="0.90" step="0.01" value="0.40">
+                </div>
+                </details>
+
+                <p class="workflow-note"><strong>要找什麼？</strong>未勾選的目標不會列入蒐證結果。</p>
+                <div class="checkbox-grid">
+                    <label class="checkbox-label"><input type="checkbox" id="cls_person" checked> 行人</label>
+                    <label class="checkbox-label"><input type="checkbox" id="cls_bicycle" checked> 單車</label>
+                    <label class="checkbox-label"><input type="checkbox" id="cls_car" checked> 汽車</label>
+                    <label class="checkbox-label"><input type="checkbox" id="cls_motorcycle" checked> 機車</label>
+                    <label class="checkbox-label"><input type="checkbox" id="cls_bus" checked> 巴士</label>
+                    <label class="checkbox-label"><input type="checkbox" id="cls_truck" checked> 卡車</label>
+                </div>
+
+                <label class="switch-row" style="margin-top: 10px; margin-bottom: 0;">
+                    <input type="checkbox" id="riderAssist" checked> 騎士關聯補償（避免機車與騎士分開蒐證）
+                </label>
+            </div>
+
+            <details class="advanced-settings auto-ai-controls">
+            <summary>進階設定：空景、停車過濾與蒐證方式</summary>
+            <!-- 卡片 3: 無人空景極速調速 -->
+            <div class="card-section auto-ai-controls">
+                <div class="card-title">
+                    <span class="card-badge">3</span>
+                    <span>無人空景極速調速</span>
+                </div>
+                <label class="switch-row">
+                    <input type="checkbox" id="fastMode" checked> 啟用極速背景處理 (關閉實時畫面)
+                </label>
+                <label class="switch-row">
+                    <input type="checkbox" id="filterStationary" checked> 啟用靜止物件過濾 (自動忽略路邊停放車輛)
+                </label>
+                <div class="slider-group">
+                    <div class="slider-header">
+                        <span>空景安全閃現跳躍間隔:</span>
+                        <span id="skipSecVal" class="highlight-val">0.2s [標準安全]</span>
+                    </div>
+                    <input type="range" id="skipSecSlider" min="0.1" max="5.0" step="0.1" value="0.2">
+                </div>
+            </div>
+
+            <!-- 卡片 4: 蒐證模式設定 -->
+            <div class="card-section auto-ai-controls">
+                <div class="card-title">
+                    <span class="card-badge">4</span>
+                    <span>蒐證模式設定</span>
+                </div>
+                <select id="captureMode" class="morandi-select" style="margin-bottom: 8px;">
+                    <option value="雙格蒐證模式 (起點+最清晰)" selected>精華雙格蒐證 (起點格 + 最清晰特徵格)</option>
+                    <option value="持續追蹤模式 (預設)">動態定時連拍 (依設定秒數連續拍照)</option>
+                    <option value="事件起訖模式">進出瞬間捕捉 (僅抓進入與離開首尾兩張)</option>
+                </select>
+                <label class="switch-row">
+                    <input type="checkbox" id="singleFolder"> 將本次批次結果集中於單一資料夾
+                </label>
+            </div>
+            </details>
+
+            <!-- 卡片 5: 戰術啟動區 -->
+            <div class="card-section">
+                <div class="card-title">
+                    <span class="card-badge">5</span>
+                    <span>步驟 3：開始或檢視結果</span>
+                </div>
+                <div class="btn-group" style="margin-bottom: 8px;">
+                    <button class="btn btn-default" style="flex:1;" onclick="clearRoi()"><i class="fas fa-draw-polygon"></i> 清除 ROI</button>
+                    <button class="btn btn-folder" style="flex:1;" onclick="openFolder()"><i class="fas fa-images"></i> 截圖資料夾</button>
+                </div>
+                <button id="btnStartAuto" class="btn btn-start" style="width: 100%; padding: 10px;" onclick="toggleAutoProcessing()">
+                    <i class="fas fa-play"></i> 開始分析
+                </button>
+            </div>
+
+            <!-- 底部版權 -->
+            <div class="footer-info">
+                AG-MONITOR v3.5 · Morandi Edition<br>
+                Developed by <a href="https://github.com/lianghao02" target="_blank">@lianghao02</a>
             </div>
         </div>
 
-        <div class="section auto-ai-controls">
-            <div class="section-title">【4. 蒐證模式設定】</div>
-            <select id="captureMode" class="cyber-select">
-                <option value="雙格蒐證模式 (起點+最清晰)" selected>精華雙格蒐證 (起點格 + 最清晰特徵格)</option>
-                <option value="持續追蹤模式 (預設)">動態定時連拍 (依設定秒數連續拍照)</option>
-                <option value="事件起訖模式">進出瞬間捕捉 (僅抓進入與離開首尾兩張)</option>
-            </select>
-            <label style="display:flex; align-items:center; gap:8px; margin-top:10px; font-size:14px; cursor:pointer;">
-                <input type="checkbox" id="singleFolder"> 將本次批次結果集中於單一資料夾
-            </label>
-        </div>
-
-        <div class="section" style="margin-bottom: 0;">
-            <div class="section-title">【5. 戰術啟動區】</div>
-            <button class="btn btn-default" style="width: 100%; margin-bottom: 8px;" onclick="clearRoi()">⬡ 清除 ROI 防線</button>
-            <button class="btn btn-folder" style="width: 100%; margin-bottom: 8px;" onclick="openFolder()">📂 開啟截圖資料夾</button>
-            <button id="btnStartAuto" class="btn btn-start" style="width: 100%; padding:10px;" onclick="toggleAutoProcessing()">▶️ 啟動全自動 AI 過濾</button>
-        </div>
-
-        <!-- 底部版權與開發者資訊 -->
-        <div style="margin-top: auto; padding: 10px; text-align: center; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color); background: #1A1A1A;">
-            AG-MONITOR v3.0<br>
-            Developed by <a href="https://github.com/lianghao02" target="_blank" style="color: var(--accent-green); text-decoration: none; font-weight: bold;">@lianghao02</a>
-        </div>
-        </div>
-        
         <!-- 側滑證物清單抽屜 -->
         <div id="queueDrawer" class="queue-drawer">
             <div class="drawer-header">
-                <span>【監視器清單】</span>
-                <button class="drawer-close-btn" onclick="toggleQueueDrawer()">✖</button>
+                <span><i class="fas fa-film"></i> 監視器證物清單</span>
+                <button class="drawer-close-btn" onclick="toggleQueueDrawer()"><i class="fas fa-xmark"></i></button>
             </div>
-            <div class="queue-box" id="queueList" style="margin-bottom:0; flex-grow:1;"></div>
+            <div class="queue-box" id="queueList"></div>
         </div>
 
-    <div class="panel-right">
-        <!-- 頂部雙模態切換 -->
-        <div class="mode-switcher-bar">
-            <button id="modeAutoBtn" class="mode-btn active" onclick="switchMode('auto')">🎯 全自動 AI 蒐證</button>
-            <button id="modeManualBtn" class="mode-btn" onclick="switchMode('manual')">👁️ 即時人眼點視</button>
-        </div>
-
-        <!-- 畫布區 -->
-        <div class="canvas-wrapper">
-            <div id="placeholderText" class="placeholder-text">
-                【AG-Forensic-Player 萬用 AI 科技偵查戰術播放器】<br><br>
-                1. 支援 .mp4, .265, .h265, .264, .dav 等原生裸流 0 秒秒開<br>
-                2. 導入後可於此劃定多邊形 ROI 防線<br>
-                3. 切換上方【即時人眼點視】可作為專業證據播放器使用
-            </div>
-            <canvas id="previewCanvas"></canvas>
-        </div>
-
-        <!-- 播放器控制列 (僅在人眼點視模式顯示) -->
-        <div id="playerControls" class="player-controls hidden">
-            <div class="timeline-container">
-                <div class="time-display" id="timeDisplay">00:00:00 / 00:00:00</div>
-                <input type="range" id="timeline" min="0" max="100" value="0" step="0.1">
-            </div>
-            <div class="control-row">
-                <div class="control-group">
-                    <button class="icon-btn" onclick="eel.play_pause()()" title="播放/暫停 (Space)"><i class="fas fa-play" id="playIcon"></i></button>
-                    <button class="icon-btn" onclick="eel.step_frame(-1)()" title="倒退一格 (Left Arrow)"><i class="fas fa-step-backward"></i></button>
-                    <button class="icon-btn" onclick="eel.step_frame(1)()" title="前進一格 (Right Arrow)"><i class="fas fa-step-forward"></i></button>
-                    <button class="icon-btn" onclick="eel.toggle_reverse()()" title="倒放開關"><i class="fas fa-backward" id="reverseIcon"></i></button>
-                </div>
-                <div class="control-group">
-                    <button class="speed-btn active" onclick="setSpeed(1, this)">1x</button>
-                    <button class="speed-btn" onclick="setSpeed(2, this)">2x</button>
-                    <button class="speed-btn" onclick="setSpeed(4, this)">4x</button>
-                    <button class="speed-btn" onclick="setSpeed(8, this)">8x</button>
-                    <button class="speed-btn" onclick="setSpeed(16, this)">16x</button>
-                </div>
-                <div class="control-group">
-                    <button class="btn btn-stop" style="font-weight:bold;" onclick="eel.manual_capture()()" title="快捷鍵: C">📸 手動快門 (C)</button>
-                </div>
-            </div>
-        </div>
-
-        <!-- 底部日誌區 -->
-        <div class="log-wrapper">
-            <div class="status-bar">
-                <span id="statusText" class="status-ok">狀態: 系統準備就緒</span>
-                <span id="progressText">0%</span>
-            </div>
-            
-            <div id="unifiedProgressContainer" style="display: none; padding: 6px 10px; background: #111; border-bottom: 1px solid #333;">
-                <div style="display: flex; justify-content: space-between; font-size: 12px; color: #00FF66; margin-bottom: 4px;">
-                    <span id="unifiedProgressLabel" style="font-weight: bold;">分析中...</span>
-                    <span id="unifiedProgressPct">0%</span>
-                </div>
-                <div style="width: 100%; height: 8px; background: #222; border-radius: 4px; overflow: hidden; box-shadow: inset 0 1px 3px rgba(0,0,0,0.5);">
-                    <div id="unifiedProgressBar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #00b34a, #00FF66); transition: width 0.1s linear;"></div>
+        <!-- 右側畫布與控制區 -->
+        <div class="panel-right">
+            <!-- 頂部雙模態切換膠囊 -->
+            <div class="mode-switcher-bar">
+                <div class="mode-segmented-control">
+                    <button id="modeAutoBtn" class="mode-btn active" onclick="switchMode('auto')">
+                        <i class="fas fa-crosshairs"></i> 全自動 AI 蒐證
+                    </button>
+                    <button id="modeManualBtn" class="mode-btn" onclick="switchMode('manual')">
+                        <i class="fas fa-eye"></i> 即時人眼點視
+                    </button>
                 </div>
             </div>
 
-            <div class="log-box" id="logBox">
-                <div class="log-entry info">系統已初始化，等待任務...</div>
+            <!-- 畫布區 (支援全區域檔案與資料夾拖曳) -->
+            <div class="canvas-wrapper" id="playerCanvasWrap">
+                <!-- 拖曳高光覆蓋層 -->
+                <div class="drag-drop-overlay" id="dragDropOverlay">
+                    <i class="fas fa-cloud-arrow-up"></i>
+                    <h3>放開滑鼠以立即匯入證物</h3>
+                    <p>支援單檔、多檔或直接拖入整個監視器資料夾</p>
+                </div>
+
+                <div id="placeholderText" class="placeholder-card" onclick="addVideos()" title="點擊匯入或直接拖曳檔案至此">
+                    <div class="placeholder-icon">
+                        <i class="fas fa-shield-halved"></i>
+                    </div>
+                    <div class="placeholder-title">AG-Forensic-Player 科技偵查戰術播放器</div>
+                    <ul class="placeholder-steps">
+                        <li><span class="badge-step">1</span> 直接將影片或監視器資料夾<b>拖曳至此處</b>，或點擊左側匯入</li>
+                        <li><span class="badge-step">2</span> 支援 .mp4, .265, .h265, .264, .dav 原生裸流極速解碼</li>
+                        <li><span class="badge-step">3</span> 載入後可在畫面上點擊畫定多邊形 ROI 防線並啟動過濾</li>
+                    </ul>
+                </div>
+                <canvas id="previewCanvas"></canvas>
             </div>
-        </div>
+
+            <!-- 播放器控制列 (人眼點視模式) -->
+            <div id="playerControls" class="player-controls hidden">
+                <div class="timeline-container">
+                    <div class="time-display" id="timeDisplay">00:00:00 / 00:00:00</div>
+                    <input type="range" id="timeline" min="0" max="100" value="0" step="0.1">
+                </div>
+                <div class="control-row">
+                    <div class="control-group">
+                        <button class="icon-btn" aria-label="播放或暫停" onclick="eel.play_pause()()" title="播放/暫停 (Space)"><i class="fas fa-play" id="playIcon"></i></button>
+                        <button class="icon-btn" aria-label="倒退一格" onclick="eel.step_frame(-1)()" title="倒退一格 (Left Arrow)"><i class="fas fa-step-backward"></i></button>
+                        <button class="icon-btn" aria-label="前進一格" onclick="eel.step_frame(1)()" title="前進一格 (Right Arrow)"><i class="fas fa-step-forward"></i></button>
+                        <button class="icon-btn" aria-label="切換倒放" onclick="eel.toggle_reverse()()" title="倒放開關"><i class="fas fa-backward" id="reverseIcon"></i></button>
+                    </div>
+                    <div class="control-group">
+                        <button class="speed-btn active" onclick="setSpeed(1, this)">1x</button>
+                        <button class="speed-btn" onclick="setSpeed(2, this)">2x</button>
+                        <button class="speed-btn" onclick="setSpeed(4, this)">4x</button>
+                        <button class="speed-btn" onclick="setSpeed(8, this)">8x</button>
+                        <button class="speed-btn" onclick="setSpeed(16, this)">16x</button>
+                    </div>
+                    <div class="control-group">
+                        <button class="btn btn-stop" onclick="eel.manual_capture()()" title="快捷鍵: C"><i class="fas fa-camera"></i> 手動快門 (C)</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 底部日誌區 -->
+            <div class="log-wrapper">
+                <div class="status-bar">
+                    <span id="statusText" class="status-pill status-ok"><i class="fas fa-circle-check"></i> 狀態: 系統準備就緒</span>
+                    <span id="progressText" style="color: var(--text-secondary);">0%</span>
+                </div>
+                
+                <div id="unifiedProgressContainer" style="display: none;">
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; color: var(--morandi-sage); font-weight: 700; margin-bottom: 4px;">
+                        <span id="unifiedProgressLabel">分析中...</span>
+                        <span id="unifiedProgressPct">0%</span>
+                    </div>
+                    <div class="progress-track">
+                        <div id="unifiedProgressBar" class="progress-fill" style="width: 0%;"></div>
+                    </div>
+                </div>
+                <div id="analysisSummary" class="analysis-summary"></div>
+
+                <div class="log-box" id="logBox">
+                    <div class="log-entry info">系統已初始化，等待任務...</div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <!-- AI SR View -->
+    <!-- 主視圖：數位鑑識照片修復 (SR View) -->
     <div id="viewSR" class="main-view">
         <div class="sr-controls">
             <input type="file" id="srFileInput" accept="image/*" class="hidden">
-            <button class="btn btn-default" onclick="document.getElementById('srFileInput').click()">📁 選擇圖片</button>
-            <div class="sr-mode-select" style="display:flex; align-items:center; gap:10px; color:#ccc; font-size:14px; margin:0 10px;">
-                <label style="cursor:pointer;"><input type="radio" name="srMode" value="plate" checked> 🚗 文字車牌 (強化邊緣)</label>
-                <label style="cursor:pointer;"><input type="radio" name="srMode" value="face"> 👤 人像五官 (降噪平滑)</label>
+            <button class="btn btn-default" onclick="document.getElementById('srFileInput').click()"><i class="fas fa-image"></i> 選擇圖片</button>
+            <div class="sr-mode-select">
+                <label><input type="radio" name="srMode" value="plate" checked> 🚗 文字車牌 (強化邊緣)</label>
+                <label><input type="radio" name="srMode" value="face"> 👤 人像五官 (降噪平滑)</label>
             </div>
-            <button id="btnStartSR" class="btn btn-start" onclick="startSR()">⚡ 開始 AI 高畫質化</button>
-            <button id="btnAbortSR" class="btn btn-stop" style="display:none; background-color:#FF4444;" onclick="abortSR()">❌ 中止修復</button>
-            <button id="btnSaveSR" class="btn btn-stop" onclick="saveSR()">💾 儲存高畫質證物</button>
+            <button id="btnStartSR" class="btn btn-start" onclick="startSR()"><i class="fas fa-bolt"></i> 開始 AI 高畫質化</button>
+            <button id="btnAbortSR" class="btn btn-stop" style="display:none;" onclick="abortSR()"><i class="fas fa-xmark"></i> 中止修復</button>
+            <button id="btnSaveSR" class="btn btn-folder" onclick="saveSR()"><i class="fas fa-floppy-disk"></i> 儲存高畫質證物</button>
         </div>
         <div class="sr-workspace">
             <div class="sr-panel sr-panel-left">
-                <div class="sr-panel-title">【🔍 原始證物格】</div>
-                <div class="sr-canvas-wrap">
-                    <span id="srLeftPlaceholder" class="placeholder-text">點擊上方按鈕選擇或拖曳證物圖片至此</span>
+                <div class="sr-panel-title"><i class="fas fa-magnifying-glass"></i> 【原始證物格】</div>
+                <div class="sr-canvas-wrap" id="srLeftWrap">
+                    <span id="srLeftPlaceholder" style="color: var(--text-muted); font-size: 13px;">點擊上方按鈕選擇或拖曳證物圖片至此</span>
                     <img id="srOriginalImg" src="" style="display:none; max-width:100%; max-height:100%; object-fit:contain;">
                 </div>
             </div>
-            <div class="sr-divider"></div>
             <div class="sr-panel sr-panel-right">
-                <div class="sr-panel-title">【🎯 AI 重建格】</div>
+                <div class="sr-panel-title"><i class="fas fa-wand-magic-sparkles"></i> 【AI 重建格】</div>
                 <div class="sr-canvas-wrap">
-                    <span id="srRightPlaceholder" class="placeholder-text">等待 AI 重建...</span>
+                    <span id="srRightPlaceholder" style="color: var(--text-muted); font-size: 13px;">等待 AI 重建...</span>
                     <img id="srEnhancedImg" src="" style="display:none; max-width:100%; max-height:100%; object-fit:contain;">
                 </div>
             </div>
         </div>
     </div>
 
+    <!-- 操作手冊 Modal -->
+    <div id="helpModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(39, 50, 64, 0.65); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(4px);">
+        <div style="background: #FFFFFF; border: 1px solid var(--morandi-border); box-shadow: var(--shadow-lg); width: 90%; max-width: 760px; max-height: 85vh; display: flex; flex-direction: column; border-radius: var(--radius-lg); overflow: hidden;">
+            <div style="padding: 14px 20px; border-bottom: 1px solid var(--morandi-border); display: flex; justify-content: space-between; align-items: center; background: var(--morandi-bg-panel);">
+                <span style="color: var(--morandi-slate); font-weight: 700; font-size: 16px;"><i class="fas fa-book-bookmark"></i> AG-MONITOR 系統操作手冊</span>
+                <button onclick="document.getElementById('helpModal').style.display='none'" style="background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; transition: 0.2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-muted)'">&times;</button>
+            </div>
+            <div style="padding: 22px 28px; overflow-y: auto; line-height: 1.7; font-size: 13.5px; color: var(--text-primary);">
+                <h3 style="color: var(--morandi-slate); margin-bottom: 8px; border-bottom: 1px solid var(--morandi-border-light); padding-bottom: 4px;"><i class="fas fa-crosshairs"></i> 模式一：全自動 AI 蒐證</h3>
+                <p style="margin-bottom: 12px; color: var(--text-secondary);">適合大量監視器影片或長時間無人空景的自動化過濾與精華截圖。</p>
+                <ol style="margin-left: 20px; margin-bottom: 18px; color: var(--text-primary);">
+                    <li style="margin-bottom: 6px;"><strong>匯入證物：</strong>直接拖曳影片或資料夾至畫面，或點擊左側「匯入影片」/「匯入資料夾」，通吃 .mp4, .265, .dav 等非標準裸流。</li>
+                    <li style="margin-bottom: 6px;"><strong>畫定防線：</strong>在中央畫面上點擊滑鼠左鍵畫出多邊形 ROI 防線（點擊「清除 ROI」可重繪）。</li>
+                    <li style="margin-bottom: 6px;"><strong>設定參數：</strong>選擇 AI 核心引擎、設定靈敏度與目標車種，並挑選蒐證模式。</li>
+                    <li style="margin-bottom: 6px;"><strong>啟動過濾：</strong>點擊「啟動全自動 AI 過濾」，完成後點擊「截圖資料夾」檢視產出成果。</li>
+                </ol>
+
+                <h3 style="color: var(--morandi-slate); margin-bottom: 8px; border-bottom: 1px solid var(--morandi-border-light); padding-bottom: 4px;"><i class="fas fa-eye"></i> 模式二：即時人眼點視</h3>
+                <p style="margin-bottom: 12px; color: var(--text-secondary);">作為專業級鑑識播放器，支援逐格精確點視與手動快門。</p>
+                <ul style="margin-left: 20px; margin-bottom: 18px; color: var(--text-primary);">
+                    <li style="margin-bottom: 6px;">點擊右上方切換至「即時人眼點視」模式。</li>
+                    <li style="margin-bottom: 6px;">下方出現播放控制列，支援 1x～16x 倍速快轉與倒放。</li>
+                    <li style="margin-bottom: 6px;"><strong>快捷鍵支援：</strong>空白鍵 (播放/暫停)、左方向鍵 (倒退一格)、右方向鍵 (前進一格)。</li>
+                    <li style="margin-bottom: 6px;"><strong>手動快門：</strong>看到關鍵畫面時按下快捷鍵 <kbd style="background: var(--morandi-bg-subtle); padding: 2px 6px; border-radius: 4px; font-weight: bold; border: 1px solid var(--morandi-border);">C</kbd> 進行無損截圖。</li>
+                </ul>
+
+                <h3 style="color: var(--morandi-slate); margin-bottom: 8px; border-bottom: 1px solid var(--morandi-border-light); padding-bottom: 4px;"><i class="fas fa-wand-magic-sparkles"></i> 模式三：數位鑑識照片修復 (SR)</h3>
+                <p style="margin-bottom: 12px; color: var(--text-secondary);">針對模糊車牌或人像五官進行深度學習超解析重建。</p>
+                <ul style="margin-left: 20px; margin-bottom: 18px; color: var(--text-primary);">
+                    <li style="margin-bottom: 6px;">點擊最上方頁籤切換至「數位鑑識照片修復」。</li>
+                    <li style="margin-bottom: 6px;">匯入或拖曳模糊照片至原始證物格，選擇車牌或人像模式。</li>
+                    <li style="margin-bottom: 6px;">點擊「開始 AI 高畫質化」，完成後可直接「儲存高畫質證物」。</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript 邏輯 (包含原生拖曳 Drag & Drop 處理) -->
     <script>
         let currentMode = 'auto'; // 'auto' or 'manual'
         let isProcessing = false;
@@ -646,9 +1264,9 @@
             let label = val <= 1.0 ? "s [標準安全]" : "s [極速/大場景限定]";
             skipSecVal.textContent = val.toFixed(1) + label; 
             if(val <= 1.0) {
-                skipSecVal.style.color = "#00ffcc";
+                skipSecVal.className = "highlight-val";
             } else {
-                skipSecVal.style.color = "#ff9900";
+                skipSecVal.className = "highlight-val amber";
             }
             if(isProcessing) eel.update_live_setting('skipSec', val)();
         };
@@ -667,6 +1285,14 @@
             if(isProcessing) eel.update_live_setting('captureMode', this.value)();
         };
 
+        document.getElementById("inferenceSize").onchange = function() {
+            if(isProcessing) eel.update_live_setting('inferenceSize', parseInt(this.value));
+        };
+
+        document.getElementById("riderAssist").onchange = function() {
+            if(isProcessing) eel.update_live_setting('riderAssist', this.checked)();
+        };
+
         function updateLiveClasses() {
             if(isProcessing) {
                 let classes = {
@@ -679,6 +1305,23 @@
                 };
                 eel.update_live_setting('classes', classes)();
             }
+        }
+
+        function applyPreset(name) {
+            const presets = {
+                standard: { model: 'yolov8n.pt', tracker: 'bytetrack', size: '960', skip: '0.2', stationary: true, hint: '一般路口：平衡辨識速度，過濾停放車輛。' },
+                distant: { model: 'yolov8s.pt', tracker: 'botsort_reid', size: '1280', skip: '0.2', stationary: true, hint: '遠距小目標：提高解析度與模型精度，處理時間較長。' },
+                occlusion: { model: 'yolov8n.pt', tracker: 'botsort_reid', size: '960', skip: '0.1', stationary: true, hint: '遮蔽車流：加強同一目標跨短暫遮蔽的追蹤。' }
+            };
+            const preset = presets[name];
+            if(!preset || isProcessing) return;
+            document.getElementById('aiModel').value = preset.model;
+            document.getElementById('trackerMode').value = preset.tracker;
+            document.getElementById('inferenceSize').value = preset.size;
+            document.getElementById('skipSecSlider').value = preset.skip;
+            document.getElementById('filterStationary').checked = preset.stationary;
+            skipSecSlider.oninput();
+            document.getElementById('presetHint').textContent = '目前：' + preset.hint;
         }
         
         function toggleQueueDrawer() {
@@ -699,6 +1342,25 @@
         timeline.oninput = function() {
             if(currentMode === 'manual') eel.seek_frame(parseFloat(this.value))();
         };
+
+        function populateQueueList(paths) {
+            if(!paths || paths.length === 0) return;
+            document.getElementById("placeholderText").style.display = "none";
+            let queueBox = document.getElementById("queueList");
+            for(let p of paths) {
+                let item = document.createElement("div");
+                item.className = "queue-item";
+                item.textContent = p.split(/[\\/]/).pop();
+                item.onclick = function() {
+                    if(isProcessing) {
+                        eel.play_specific_video(p)();
+                        toggleQueueDrawer();
+                    }
+                };
+                queueBox.appendChild(item);
+            }
+            document.getElementById('queueSummary').innerHTML = `<i class="fas fa-film"></i> 已匯入 ${queueBox.children.length} 支影片`;
+        }
 
         async function batchRename() {
             if(isProcessing) {
@@ -723,8 +1385,6 @@
             }
             
             appendLog(`智能校正檔名完成！共修改了 ${res.count} 個檔案`, "success");
-            
-            // 強勢的完成提示，讓使用者明確知道瞬間完成了
             alert(`✅ 檔案名稱已全部校正完畢！\n\n系統已修改了 ${res.count} 個實體檔案。\n您可以直接開始進行 AI 證據過濾了！`);
         }
         
@@ -765,9 +1425,9 @@
             
             let btn = document.getElementById('btnStartAuto');
             if(mode === 'auto') {
-                btn.innerHTML = "▶️ 啟動全自動 AI 過濾";
+                btn.innerHTML = '<i class="fas fa-play"></i> 啟動全自動 AI 過濾';
             } else {
-                btn.innerHTML = "▶️ 載入戰術播放引擎";
+                btn.innerHTML = '<i class="fas fa-video"></i> 載入戰術播放引擎';
             }
             
             eel.set_engine_mode(mode)();
@@ -784,20 +1444,8 @@
             if(isProcessing) return;
             let paths = await eel.add_folder_dialog()();
             if(paths && paths.length > 0) {
-                document.getElementById("placeholderText").style.display = "none";
-                let queueBox = document.getElementById("queueList");
-                for(let p of paths) {
-                    let item = document.createElement("div");
-                    item.className = "queue-item";
-                    item.textContent = p.split(/[\\/]/).pop();
-                    item.onclick = function() {
-                        if(isProcessing) {
-                            eel.play_specific_video(p)();
-                            toggleQueueDrawer(); // Auto-close drawer
-                        }
-                    };
-                    queueBox.appendChild(item);
-                }
+                populateQueueList(paths);
+                appendLog(`已匯入資料夾，載入 ${paths.length} 個視訊檔案`, "success");
             }
         }
 
@@ -805,27 +1453,94 @@
             if(isProcessing) return;
             let paths = await eel.add_videos_dialog()();
             if(paths && paths.length > 0) {
-                document.getElementById("placeholderText").style.display = "none";
-                let queueBox = document.getElementById("queueList");
-                for(let p of paths) {
-                    let item = document.createElement("div");
-                    item.className = "queue-item";
-                    item.textContent = p.split(/[\\/]/).pop();
-                    item.onclick = function() {
-                        if(isProcessing) {
-                            eel.play_specific_video(p)();
-                            toggleQueueDrawer(); // Auto-close drawer
-                        }
-                    };
-                    queueBox.appendChild(item);
-                }
+                populateQueueList(paths);
+                appendLog(`已匯入 ${paths.length} 個視訊檔案`, "success");
             }
         }
+
+        // =========================================================================
+        // 拖曳匯入處理 (Drag & Drop Implementation)
+        // =========================================================================
+        const playerCanvasWrap = document.getElementById('playerCanvasWrap');
+        const dragOverlay = document.getElementById('dragDropOverlay');
+        let dragCounter = 0;
+
+        window.addEventListener('dragenter', function(e) {
+            e.preventDefault();
+            if(document.getElementById('viewPlayer').classList.contains('active')) {
+                dragCounter++;
+                dragOverlay.style.display = 'flex';
+                playerCanvasWrap.classList.add('drag-active');
+            }
+        });
+
+        window.addEventListener('dragover', function(e) {
+            e.preventDefault();
+        });
+
+        window.addEventListener('dragleave', function(e) {
+            e.preventDefault();
+            dragCounter--;
+            if(dragCounter <= 0) {
+                dragCounter = 0;
+                dragOverlay.style.display = 'none';
+                playerCanvasWrap.classList.remove('drag-active');
+            }
+        });
+
+        window.addEventListener('drop', async function(e) {
+            e.preventDefault();
+            dragCounter = 0;
+            dragOverlay.style.display = 'none';
+            playerCanvasWrap.classList.remove('drag-active');
+
+            if(!document.getElementById('viewPlayer').classList.contains('active')) return;
+            if(isProcessing) {
+                appendLog("分析進行中，請先停止任務後再拖曳匯入新檔案", "warn");
+                return;
+            }
+
+            const files = e.dataTransfer.files;
+            if(files && files.length > 0) {
+                let droppedPaths = [];
+                let fileMetadataList = [];
+                for(let i = 0; i < files.length; i++) {
+                    if(files[i].path) {
+                        droppedPaths.push(files[i].path);
+                    }
+                    fileMetadataList.push({
+                        name: files[i].name,
+                        size: files[i].size
+                    });
+                }
+
+                if(droppedPaths.length > 0) {
+                    let added = await eel.add_dropped_paths(droppedPaths)();
+                    if(added && added.length > 0) {
+                        populateQueueList(added);
+                        appendLog(`🎯 拖曳匯入成功！已新增 ${added.length} 支證物影片至清單`, "success");
+                    } else {
+                        appendLog("拖曳之檔案已存在於清單或非支援之視訊格式", "warn");
+                    }
+                } else {
+                    // 啟用智慧反查解析器 (Smart Path Resolver)
+                    let res = await eel.resolve_and_add_dropped_files(fileMetadataList)();
+                    if(res && res.success && res.added_paths.length > 0) {
+                        populateQueueList(res.added_paths);
+                        appendLog(`🎯 智慧拖曳成功！已自動定位並匯入 ${res.added_paths.length} 支證物影片`, "success");
+                    } else {
+                        appendLog("未在專案或常用路徑中搜尋到該檔案，正在開啟定位對話框...", "info");
+                        addVideos();
+                    }
+                }
+            }
+        });
 
         function clearQueue() {
             if(isProcessing) return;
             eel.clear_queue()();
             document.getElementById("queueList").innerHTML = "";
+            document.getElementById('queueSummary').innerHTML = '<i class="fas fa-hand-pointer"></i> 支援拖曳';
             clearRoi();
             document.getElementById("placeholderText").style.display = "block";
             let canvas = document.getElementById("previewCanvas");
@@ -846,7 +1561,7 @@
         async function toggleAutoProcessing() {
             let btn = document.getElementById("btnStartAuto");
             if(isProcessing) {
-                btn.innerHTML = currentMode === 'auto' ? "▶️ 啟動全自動 AI 過濾" : "▶️ 載入戰術播放引擎";
+                btn.innerHTML = currentMode === 'auto' ? '<i class="fas fa-play"></i> 啟動全自動 AI 過濾' : '<i class="fas fa-video"></i> 載入戰術播放引擎';
                 btn.className = "btn btn-start";
                 document.getElementById("aiModel").disabled = false;
                 document.getElementById("trackerMode").disabled = false;
@@ -870,16 +1585,20 @@
                 fastMode: fastModeCb.checked,
                 filterStationary: filterStationaryCb.checked,
                 skipSec: parseFloat(skipSecSlider.value),
-                singleFolder: document.getElementById("singleFolder").checked
+                singleFolder: document.getElementById("singleFolder").checked,
+                inferenceSize: parseInt(document.getElementById("inferenceSize").value),
+                riderAssist: document.getElementById("riderAssist").checked
             };
             
-            btn.innerHTML = currentMode === 'auto' ? "⏹️ 停止全自動分析" : "⏹️ 關閉播放引擎";
+            btn.innerHTML = currentMode === 'auto' ? '<i class="fas fa-stop"></i> 停止全自動分析' : '<i class="fas fa-stop"></i> 關閉播放引擎';
             btn.className = "btn btn-stop";
             document.getElementById("aiModel").disabled = true;
             document.getElementById("trackerMode").disabled = true;
             isProcessing = true;
             
             document.getElementById("logBox").innerHTML = "";
+            document.getElementById('analysisSummary').style.display = 'block';
+            document.getElementById('analysisSummary').innerHTML = `<strong>分析準備中</strong>｜${document.getElementById('queueList').children.length} 支影片｜停放車輛過濾：${settings.filterStationary ? '開啟' : '關閉'}｜追蹤：${document.getElementById('trackerMode').selectedOptions[0].text}`;
             appendLog(currentMode === 'auto' ? ">>> 系統啟動，全記憶體零延遲解碼引擎發動..." : ">>> 戰術播放引擎已載入，請使用下方控制列操作", "info");
             
             await eel.start_processing(settings)();
@@ -889,10 +1608,10 @@
         eel.expose(updateStatus);
         function updateStatus(text, level) {
             let el = document.getElementById("statusText");
-            el.textContent = text;
-            if(level === 'ok') el.className = "status-ok";
-            else if(level === 'warn') el.className = "status-warn";
-            else el.className = "status-danger";
+            el.innerHTML = `<i class="fas ${level === 'ok' ? 'fa-circle-check' : level === 'warn' ? 'fa-triangle-exclamation' : 'fa-circle-xmark'}"></i> ${text}`;
+            if(level === 'ok') el.className = "status-pill status-ok";
+            else if(level === 'warn') el.className = "status-pill status-warn";
+            else el.className = "status-pill status-danger";
         }
 
         eel.expose(updateProgress);
@@ -904,6 +1623,8 @@
             }
             if(isProcessing) {
                 showUnifiedProgress("🕵️ AI 證據全自動過濾分析中", parseFloat(percent));
+                document.getElementById('analysisSummary').style.display = 'block';
+                document.getElementById('analysisSummary').innerHTML = `<strong>分析中 ${parseFloat(percent).toFixed(1)}%</strong>｜目前時間：${timecode || '準備中'}｜靜止與重複目標將依目前設定自動過濾`;
             }
         }
 
@@ -912,7 +1633,7 @@
             isPlaying = playing;
             isReverse = reverse;
             document.getElementById("playIcon").className = playing ? "fas fa-pause" : "fas fa-play";
-            document.getElementById("reverseIcon").style.color = reverse ? "var(--accent-green)" : "#CCC";
+            document.getElementById("reverseIcon").style.color = reverse ? "var(--morandi-sage)" : "var(--text-muted)";
         }
 
         eel.expose(appendLog);
@@ -930,12 +1651,14 @@
             isProcessing = false;
             hideUnifiedProgress();
             let btn = document.getElementById("btnStartAuto");
-            btn.innerHTML = currentMode === 'auto' ? "▶️ 啟動全自動 AI 過濾" : "▶️ 載入戰術播放引擎";
+            btn.innerHTML = currentMode === 'auto' ? '<i class="fas fa-play"></i> 啟動全自動 AI 過濾' : '<i class="fas fa-video"></i> 載入戰術播放引擎';
             btn.className = "btn btn-start";
             document.getElementById("aiModel").disabled = false;
             document.getElementById("trackerMode").disabled = false;
             document.getElementById("progressText").textContent = "0%";
             document.getElementById("timeline").value = 0;
+            document.getElementById('analysisSummary').style.display = 'block';
+            document.getElementById('analysisSummary').innerHTML = '<strong>任務已結束</strong>｜請開啟截圖資料夾檢視結果與鑑識紀錄。';
             appendLog(">>> 任務結束或已手動中止", "info");
         }
 
@@ -980,13 +1703,13 @@
             ctx.drawImage(currentImage, 0, 0);
             
             if(currentOsdText) {
-                ctx.font = "16px 'Segoe UI', Arial, sans-serif";
+                ctx.font = "14px 'Segoe UI', 'Microsoft JhengHei', sans-serif";
                 let text = "AG-MONITOR | " + currentOsdText;
                 let metrics = ctx.measureText(text);
-                ctx.fillStyle = "rgba(0, 0, 0, 0.7)";
-                ctx.fillRect(5, canvas.height - 25, metrics.width + 10, 20);
-                ctx.fillStyle = "#00FFFF";
-                ctx.fillText(text, 10, canvas.height - 6);
+                ctx.fillStyle = "rgba(24, 28, 34, 0.85)";
+                ctx.fillRect(8, canvas.height - 28, metrics.width + 16, 22);
+                ctx.fillStyle = "#A8C7B5";
+                ctx.fillText(text, 16, canvas.height - 12);
             }
 
             if(currentBoxes && currentBoxes.length > 0) {
@@ -994,38 +1717,120 @@
                     let w = box.x2 - box.x1;
                     let h = box.y2 - box.y1;
                     
-                    ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+                    // 車種顏色分類：機車/單車用金橘、汽車/卡車用天藍、行人用亮綠
+                    let themeColor = "#FFA726"; // 預設金橘
+                    let cname = box.cls_name || "";
+                    if(cname.includes("car") || cname.includes("bus") || cname.includes("truck") || cname.includes("汽車") || cname.includes("卡車")) {
+                        themeColor = "#29B6F6";
+                    } else if(cname.includes("person") || cname.includes("行人")) {
+                        themeColor = "#26A69A";
+                    } else if(cname.includes("motorcycle") || cname.includes("bicycle") || cname.includes("機車") || cname.includes("單車")) {
+                        themeColor = "#FF7043";
+                    }
+
+                    // 1. 雙層實體框 (黑底 4px + 主題色 2.5px)
+                    ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
                     ctx.shadowBlur = 4;
-                    ctx.strokeStyle = "#FF3366";
-                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = "rgba(0,0,0,0.85)";
+                    ctx.lineWidth = 4.5;
+                    ctx.strokeRect(box.x1, box.y1, w, h);
+
+                    ctx.strokeStyle = themeColor;
+                    ctx.lineWidth = 2.2;
                     ctx.strokeRect(box.x1, box.y1, w, h);
                     ctx.shadowBlur = 0;
                     
-                    let label = "ID:" + box.tid + " " + box.cls_name + " " + box.conf.toFixed(2);
-                    ctx.font = "bold 12px 'Segoe UI', Arial, sans-serif";
+                    // 2. 標籤抬頭 (HUD Pill Badge)
+                    let clsDisplayName = cname;
+                    if(cname === 'motorcycle') clsDisplayName = '機車';
+                    else if(cname === 'bicycle') clsDisplayName = '單車';
+                    else if(cname === 'person') clsDisplayName = '行人';
+                    else if(cname === 'car') clsDisplayName = '汽車';
+                    else if(cname === 'bus') clsDisplayName = '巴士';
+                    else if(cname === 'truck') clsDisplayName = '卡車';
+
+                    let label = `ID:${box.tid} ${clsDisplayName} ${parseFloat(box.conf).toFixed(2)}`;
+                    ctx.font = "bold 12px 'Segoe UI', 'Microsoft JhengHei', sans-serif";
                     let tw = ctx.measureText(label).width;
                     
-                    ctx.fillStyle = "rgba(255, 51, 102, 0.85)";
-                    ctx.fillRect(box.x1, box.y1 - 18, tw + 6, 18);
+                    // 標籤黑底與主題色彩邊
+                    let tagY = Math.max(18, box.y1);
+                    ctx.fillStyle = "rgba(18, 22, 28, 0.9)";
+                    ctx.beginPath();
+                    ctx.roundRect(box.x1, tagY - 18, tw + 10, 18, [3, 3, 0, 0]);
+                    ctx.fill();
+
+                    ctx.fillStyle = themeColor;
+                    ctx.fillRect(box.x1, tagY - 18, 3, 18);
+
                     ctx.fillStyle = "#FFFFFF";
-                    ctx.fillText(label, box.x1 + 3, box.y1 - 5);
+                    ctx.fillText(label, box.x1 + 6, tagY - 4);
                 }
             }
             
             if(roiPoints.length > 0) {
-                ctx.strokeStyle = "#00FF66";
-                ctx.lineWidth = 2;
+                // 1. ROI 內部半透明防區填充
                 ctx.beginPath();
                 ctx.moveTo(roiPoints[0][0], roiPoints[0][1]);
                 for(let i=1; i<roiPoints.length; i++) ctx.lineTo(roiPoints[i][0], roiPoints[i][1]);
-                if(roiPoints.length > 1) ctx.lineTo(roiPoints[0][0], roiPoints[0][1]);
+                if(roiPoints.length > 2) {
+                    ctx.closePath();
+                    ctx.fillStyle = "rgba(0, 255, 136, 0.16)";
+                    ctx.fill();
+                }
+
+                // 2. 雙層高對比防線 (底層深色陰影 + 頂層亮螢光青綠)
+                ctx.save();
+                ctx.shadowColor = "rgba(0, 0, 0, 0.85)";
+                ctx.shadowBlur = 6;
+                ctx.strokeStyle = "rgba(10, 20, 15, 0.9)";
+                ctx.lineWidth = 5;
+                ctx.lineJoin = "round";
                 ctx.stroke();
                 
-                ctx.fillStyle = "#D9383A";
-                for(let pt of roiPoints) {
+                ctx.strokeStyle = "#00FF88";
+                ctx.lineWidth = 2.8;
+                ctx.stroke();
+                ctx.restore();
+                
+                // 3. 頂點錨點 (雙環高亮圓點 + 序號標籤)
+                for(let idx = 0; idx < roiPoints.length; idx++) {
+                    let pt = roiPoints[idx];
+                    // 外環 (鮮黃橘金)
                     ctx.beginPath();
-                    ctx.arc(pt[0], pt[1], 4, 0, 2*Math.PI);
+                    ctx.arc(pt[0], pt[1], 7.5, 0, 2*Math.PI);
+                    ctx.fillStyle = "#FFB800";
                     ctx.fill();
+                    ctx.lineWidth = 2;
+                    ctx.strokeStyle = "#1A1A1A";
+                    ctx.stroke();
+
+                    // 內環 (純白核心)
+                    ctx.beginPath();
+                    ctx.arc(pt[0], pt[1], 3.5, 0, 2*Math.PI);
+                    ctx.fillStyle = "#FFFFFF";
+                    ctx.fill();
+                }
+
+                // 4. 防線 HUD 標籤
+                if(roiPoints.length >= 1) {
+                    let p0 = roiPoints[0];
+                    let tagText = "🛡️ ROI 鑑識防護區";
+                    ctx.font = "bold 12px 'Segoe UI', 'Microsoft JhengHei', sans-serif";
+                    let tagW = ctx.measureText(tagText).width;
+                    let tagX = Math.max(10, p0[0] - 10);
+                    let tagY = Math.max(24, p0[1] - 12);
+                    
+                    ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+                    ctx.beginPath();
+                    ctx.roundRect(tagX - 4, tagY - 14, tagW + 16, 20, 4);
+                    ctx.fill();
+                    ctx.strokeStyle = "#00FF88";
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+
+                    ctx.fillStyle = "#00FF88";
+                    ctx.fillText(tagText, tagX + 4, tagY);
                 }
             }
         }
@@ -1083,24 +1888,21 @@
             }
         });
 
-        // Drag & Drop Implementation for Photo Repair
-        const srCanvasWrap = document.querySelector('.sr-panel-left .sr-canvas-wrap');
+        // Drag & Drop for Photo Repair
+        const srCanvasWrap = document.getElementById('srLeftWrap');
         srCanvasWrap.addEventListener('dragover', function(e) {
             e.preventDefault();
-            srCanvasWrap.style.borderColor = 'var(--accent-green)';
-            srCanvasWrap.style.background = 'rgba(0, 255, 102, 0.05)';
+            srCanvasWrap.classList.add('drag-active');
         });
         
         srCanvasWrap.addEventListener('dragleave', function(e) {
             e.preventDefault();
-            srCanvasWrap.style.borderColor = '#444';
-            srCanvasWrap.style.background = '#000';
+            srCanvasWrap.classList.remove('drag-active');
         });
         
         srCanvasWrap.addEventListener('drop', function(e) {
             e.preventDefault();
-            srCanvasWrap.style.borderColor = '#444';
-            srCanvasWrap.style.background = '#000';
+            srCanvasWrap.classList.remove('drag-active');
             
             const files = e.dataTransfer.files;
             if (files && files.length > 0) {
@@ -1134,19 +1936,17 @@
             
             isSRProcessing = true;
             let btn = document.getElementById("btnStartSR");
-            btn.innerHTML = "⏳ AI 鑑識運算中...";
-            btn.style.opacity = "0.5";
+            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> AI 鑑識運算中...';
+            btn.style.opacity = "0.6";
             btn.style.cursor = "not-allowed";
             
-            document.getElementById("btnAbortSR").style.display = "inline-block";
+            document.getElementById("btnAbortSR").style.display = "inline-flex";
             
             document.getElementById('srRightPlaceholder').style.display = 'block';
             document.getElementById('srRightPlaceholder').textContent = '🧠 載入深度學習模型並進行像素重建... (或從雲端拉取權重檔)';
             document.getElementById('srEnhancedImg').style.display = 'none';
             
             let mode = document.querySelector('input[name="srMode"]:checked').value;
-            
-            // Call eel non-blocking
             eel.run_ai_super_resolution(srOriginalBase64, mode)();
         }
 
@@ -1156,7 +1956,7 @@
             
             isSRProcessing = false;
             let btn = document.getElementById("btnStartSR");
-            btn.innerHTML = "⚡ 開始 AI 高畫質化";
+            btn.innerHTML = '<i class="fas fa-bolt"></i> 開始 AI 高畫質化';
             btn.style.opacity = "1";
             btn.style.cursor = "pointer";
             
@@ -1169,14 +1969,14 @@
         function on_super_res_finished(base64Data, errorMsg) {
             isSRProcessing = false;
             let btn = document.getElementById("btnStartSR");
-            btn.innerHTML = "⚡ 開始 AI 高畫質化";
+            btn.innerHTML = '<i class="fas fa-bolt"></i> 開始 AI 高畫質化';
             btn.style.opacity = "1";
             btn.style.cursor = "pointer";
             
             document.getElementById("btnAbortSR").style.display = "none";
 
             if(errorMsg) {
-                document.getElementById('srRightPlaceholder').innerHTML = `<span style="color:#FF4444;">${errorMsg}</span>`;
+                document.getElementById('srRightPlaceholder').innerHTML = `<span style="color:var(--morandi-rose);">${errorMsg}</span>`;
             } else if (base64Data) {
                 srEnhancedBase64 = base64Data;
                 document.getElementById('srEnhancedImg').src = "data:image/jpeg;base64," + base64Data;
@@ -1195,42 +1995,5 @@
             eel.save_enhanced_evidence(srEnhancedBase64, mode)();
         }
     </script>
-
-    <!-- 操作手冊 Modal -->
-    <div id="helpModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(0,0,0,0.85); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(5px);">
-        <div style="background: var(--bg-panel); border: 1px solid var(--accent-green); box-shadow: 0 0 20px rgba(0,255,102,0.2); width: 90%; max-width: 800px; max-height: 85vh; display: flex; flex-direction: column; border-radius: 8px; overflow: hidden;">
-            <div style="padding: 15px 20px; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; background: #1A1A1A;">
-                <span style="color: var(--accent-green); font-weight: bold; font-size: 18px;"><i class="fas fa-book"></i> AG-MONITOR 系統操作手冊</span>
-                <button onclick="document.getElementById('helpModal').style.display='none'" style="background: transparent; border: none; color: #AAA; font-size: 24px; cursor: pointer; transition: 0.2s;" onmouseover="this.style.color='#FFF'" onmouseout="this.style.color='#AAA'">&times;</button>
-            </div>
-            <div style="padding: 25px; overflow-y: auto; line-height: 1.7; font-size: 14px; color: #E0E0E0;">
-                <h3 style="color: var(--accent-blue); margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">🎯 模式一：全自動 AI 蒐證</h3>
-                <p style="margin-bottom: 15px; color: #BBB;">適合大量影片或長時間空景的自動化過濾與截圖。</p>
-                <ol style="margin-left: 20px; margin-bottom: 20px; color: #DDD;">
-                    <li style="margin-bottom: 8px;"><strong>匯入證物：</strong>點擊左側「匯入影片」或「匯入資料夾」，支援 .mp4, .265, .dav 等特殊格式。</li>
-                    <li style="margin-bottom: 8px;"><strong>畫定防線：</strong>在中央畫面上點擊滑鼠左鍵，畫出多邊形的「ROI 感興趣區域」。(點擊左側「清除 ROI」可重畫)</li>
-                    <li style="margin-bottom: 8px;"><strong>選擇設定：</strong>設定 AI 靈敏度、選擇要捕捉的目標 (人/車)，並設定「蒐證模式」(例如精華雙格或持續追蹤)。</li>
-                    <li style="margin-bottom: 8px;"><strong>啟動引擎：</strong>點擊「啟動全自動 AI 過濾」，系統會在背景極速掃描。完成後點擊「開啟截圖資料夾」檢視成果。</li>
-                </ol>
-
-                <h3 style="color: var(--accent-blue); margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">👁️ 模式二：即時人眼點視</h3>
-                <p style="margin-bottom: 15px; color: #BBB;">作為專業級證據播放器，支援逐格精確檢視。</p>
-                <ul style="margin-left: 20px; margin-bottom: 20px; color: #DDD;">
-                    <li style="margin-bottom: 8px;">點擊右上方切換至「即時人眼點視」模式。</li>
-                    <li style="margin-bottom: 8px;">下方將出現播放控制列，支援快轉 (最高 16x)、倒放。</li>
-                    <li style="margin-bottom: 8px;"><strong>快捷鍵支援：</strong>空白鍵 (播放/暫停)、左方向鍵 (倒退一格)、右方向鍵 (前進一格)。</li>
-                    <li style="margin-bottom: 8px;"><strong>手動截圖：</strong>看到關鍵畫面時，可直接按下快捷鍵 <kbd style="background: #333; padding: 2px 6px; border-radius: 4px;">C</kbd> 進行無損截圖。</li>
-                </ul>
-
-                <h3 style="color: var(--accent-blue); margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;">📸 模式三：數位鑑識照片修復 (SR)</h3>
-                <p style="margin-bottom: 15px; color: #BBB;">針對模糊的車牌或人臉進行 AI 去噪與超解析重建。</p>
-                <ul style="margin-left: 20px; margin-bottom: 20px; color: #DDD;">
-                    <li style="margin-bottom: 8px;">點擊最上方頁籤切換至「數位鑑識照片修復」。</li>
-                    <li style="margin-bottom: 8px;">匯入剛才截下來的模糊照片，選擇對應的模型 (車牌強化或人臉特化)。</li>
-                    <li style="margin-bottom: 8px;">點擊「開始 AI 高畫質化」，完成後可點擊「儲存鑑識結果」。</li>
-                </ul>
-            </div>
-        </div>
-    </div>
 </body>
 </html>

@@ -428,6 +428,81 @@ class ForensicCoreTests(unittest.TestCase):
 
         self.assertEqual(attempts, [8000, 8001])
 
+    def test_live_processing_settings_preserve_inference_options(self):
+        current = {
+            "confThresh": 0.45,
+            "fastMode": True,
+            "skipSec": 0.2,
+            "classes": {"0": True},
+            "captureMode": "",
+            "filterStationary": True,
+            "inferenceSize": 640,
+            "riderAssist": False,
+        }
+
+        resolved = main.resolve_live_processing_settings(
+            {"inferenceSize": 1280, "riderAssist": True}, current
+        )
+
+        self.assertEqual(resolved["inferenceSize"], 1280)
+        self.assertTrue(resolved["riderAssist"])
+        self.assertEqual(resolved["confThresh"], 0.45)
+
+    def test_motion_confirmation_filters_jitter_and_keeps_small_targets(self):
+        parked_state = {
+            "start_centroid": (100.0, 100.0),
+            "start_box_size": (200, 100),
+            "is_moving": False,
+            "motion_confirmations": 0,
+        }
+        self.assertFalse(main.record_motion_observation(parked_state, (110.0, 102.0), (203, 99)))
+        self.assertFalse(main.record_motion_observation(parked_state, (109.0, 98.0), (201, 102)))
+
+        distant_vehicle_state = {
+            "start_centroid": (50.0, 50.0),
+            "start_box_size": (60, 30),
+            "is_moving": False,
+            "motion_confirmations": 0,
+        }
+        self.assertFalse(main.record_motion_observation(distant_vehicle_state, (57.0, 50.0), (60, 30)))
+        self.assertTrue(main.record_motion_observation(distant_vehicle_state, (58.0, 50.0), (60, 30)))
+
+    def test_add_dropped_paths_files_and_directories(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            video1 = temp_path / "cam01.mp4"
+            video1.write_bytes(b"dummy")
+            video2 = temp_path / "sub" / "cam02.dav"
+            video2.parent.mkdir(parents=True, exist_ok=True)
+            video2.write_bytes(b"dummy")
+            txt_file = temp_path / "note.txt"
+            txt_file.write_bytes(b"dummy")
+
+            with patch.object(main, "video_queue", []), patch.object(main, "load_preview_frame"):
+                added = main.add_dropped_paths([str(video1), str(temp_path), str(txt_file)])
+                # 應包含 video1 以及 temp_path 掃描到的 video2，但忽略 txt_file
+                normalized_added = [os.path.normpath(p) for p in added]
+                self.assertIn(os.path.normpath(str(video1)), normalized_added)
+                self.assertIn(os.path.normpath(str(video2)), normalized_added)
+                self.assertNotIn(os.path.normpath(str(txt_file)), normalized_added)
+
+    def test_resolve_and_add_dropped_files(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            temp_path = Path(temp_dir)
+            video1 = temp_path / "input_videos" / "target.mp4"
+            video1.parent.mkdir(parents=True, exist_ok=True)
+            video1.write_bytes(b"dummy12345")
+            
+            with patch.object(main.CONFIG, "BASE_DIR", str(temp_path)), \
+                 patch.object(main, "video_queue", []), \
+                 patch.object(main, "load_preview_frame"):
+                
+                meta = [{"name": "target.mp4", "size": len(b"dummy12345")}]
+                res = main.resolve_and_add_dropped_files(meta)
+                self.assertTrue(res["success"])
+                self.assertEqual(len(res["added_paths"]), 1)
+                self.assertEqual(os.path.normpath(res["added_paths"][0]), os.path.normpath(str(video1)))
+
 
 if __name__ == "__main__":
     unittest.main()

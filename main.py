@@ -91,6 +91,8 @@ class CONFIG:
     DECODER_MAX_CONSECUTIVE_ERRORS = 100
     BYTETRACK_OCCLUSION_GRACE_SEC = 1.5
     BOTSORT_REID_OCCLUSION_GRACE_SEC = 6.0
+    TRACK_REIDENTIFY_GRACE_SEC = 3.0
+    MOTION_CONFIRMATION_FRAMES = 2
     TRACKER_CONFIGS = {
         "bytetrack": os.path.join(BASE_DIR, "trackers", "ag_bytetrack.yaml"),
         "botsort_reid": os.path.join(BASE_DIR, "trackers", "ag_botsort_reid.yaml"),
@@ -177,11 +179,38 @@ def tracker_occlusion_grace_seconds(tracker_mode):
 def resolve_live_processing_settings(live_settings, current_settings):
     """合併分析中的即時設定；未變更欄位沿用目前值。"""
     resolved = current_settings.copy()
-    for key in ("confThresh", "fastMode", "skipSec", "classes", "captureMode", "filterStationary"):
+    for key in (
+        "confThresh", "fastMode", "skipSec", "classes", "captureMode",
+        "filterStationary", "inferenceSize", "riderAssist",
+    ):
         if key in live_settings:
             resolved[key] = live_settings[key]
     resolved["skipSec"] = float(resolved["skipSec"])
     return resolved
+
+
+def record_motion_observation(state, centroid, box_size):
+    """以目標尺寸自適應的門檻確認移動，排除停放車輛的邊界框抖動。"""
+    if state["is_moving"]:
+        return True
+
+    start_cx, start_cy = state["start_centroid"]
+    start_w, start_h = state["start_box_size"]
+    width, height = box_size
+    displacement = math.hypot(centroid[0] - start_cx, centroid[1] - start_cy)
+    reference_size = max(1, start_w, start_h)
+    movement_threshold = max(6.0, min(32.0, reference_size * 0.08))
+    size_threshold = max(6.0, min(32.0, reference_size * 0.10))
+    size_change = max(abs(width - start_w), abs(height - start_h))
+
+    if displacement >= movement_threshold or size_change >= size_threshold:
+        state["motion_confirmations"] += 1
+    else:
+        state["motion_confirmations"] = 0
+
+    if state["motion_confirmations"] >= CONFIG.MOTION_CONFIRMATION_FRAMES:
+        state["is_moving"] = True
+    return state["is_moving"]
 
 
 def should_trigger_decoder_deadlock(phase, elapsed, timeout=CONFIG.DECODER_DEADLOCK_SEC):
@@ -319,6 +348,126 @@ def add_folder_dialog():
             Thread(target=load_preview_frame, args=(video_queue[0],), daemon=True).start()
             
     return added_paths
+
+@eel.expose
+def add_dropped_paths(paths):
+    """處理從桌面或檔案總管拖曳進入的檔案或資料夾路徑。"""
+    global video_queue
+    if not paths or not isinstance(paths, list):
+        return []
+        
+    valid_extensions = {
+        ".mp4", ".avi", ".mkv", ".mov", ".m4v", ".h264", ".h265", ".264", ".265", ".dav", ".flv", ".ts", ".wmv",
+        ".mp4]", ".avi]", ".mkv]", ".mov]", ".m4v]", ".h264]", ".h265]", ".264]", ".265]", ".dav]", ".flv]", ".ts]", ".wmv]"
+    }
+    
+    added_paths = []
+    with list_lock:
+        for raw_path in paths:
+            if not isinstance(raw_path, str):
+                continue
+            normalized_path = os.path.normpath(raw_path).replace("\\", "/")
+            if os.path.isfile(raw_path):
+                ext = os.path.splitext(raw_path)[1].lower()
+                if ext in valid_extensions and normalized_path not in video_queue:
+                    video_queue.append(normalized_path)
+                    added_paths.append(normalized_path)
+            elif os.path.isdir(raw_path):
+                for root_dir, _dirs, files in os.walk(raw_path):
+                    for file in files:
+                        ext = os.path.splitext(file)[1].lower()
+                        if ext in valid_extensions:
+                            full_path = os.path.normpath(os.path.join(root_dir, file)).replace("\\", "/")
+                            if full_path not in video_queue:
+                                video_queue.append(full_path)
+                                added_paths.append(full_path)
+                                
+        if added_paths and len(video_queue) == len(added_paths):
+            Thread(target=load_preview_frame, args=(video_queue[0],), daemon=True).start()
+            
+    return added_paths
+
+@eel.expose
+def resolve_and_add_dropped_files(file_metadata_list):
+    """
+    當前端受限於瀏覽器安全沙盒無法獲取 fullpath 時，
+    透過前端提供的檔名 (name) 與大小 (size) 在專案目錄、常用監視器目錄中極速反查真實絕對路徑。
+    """
+    global video_queue
+    if not file_metadata_list or not isinstance(file_metadata_list, list):
+        return {"success": False, "added_paths": [], "unresolved_names": []}
+
+    valid_extensions = {
+        ".mp4", ".avi", ".mkv", ".mov", ".m4v", ".h264", ".h265", ".264", ".265", ".dav", ".flv", ".ts", ".wmv",
+        ".mp4]", ".avi]", ".mkv]", ".mov]", ".m4v]", ".h264]", ".h265]", ".264]", ".265]", ".dav]", ".flv]", ".ts]", ".wmv]"
+    }
+
+    # 優先搜尋候選目錄（專案目錄及其子目錄、桌面、下載、常見目錄）
+    search_dirs = [
+        os.path.join(CONFIG.BASE_DIR, "input_videos"),
+        CONFIG.BASE_DIR,
+        os.path.join(CONFIG.BASE_DIR, "videos"),
+        os.path.join(CONFIG.BASE_DIR, "test_videos"),
+        os.path.expanduser("~/Desktop"),
+        os.path.expanduser("~/Downloads"),
+    ]
+    
+    # 建立目前可搜尋目錄下的快速檔案索引 (檔名 -> list of full_paths)
+    candidate_map = {}
+    for s_dir in search_dirs:
+        if os.path.exists(s_dir) and os.path.isdir(s_dir):
+            for root, _dirs, files in os.walk(s_dir):
+                for f in files:
+                    ext = os.path.splitext(f)[1].lower()
+                    if ext in valid_extensions:
+                        full_p = os.path.normpath(os.path.join(root, f)).replace("\\", "/")
+                        candidate_map.setdefault(f.lower(), []).append(full_p)
+
+    added_paths = []
+    unresolved_names = []
+
+    with list_lock:
+        for item in file_metadata_list:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name", "").strip()
+            size = item.get("size", 0)
+            if not name:
+                continue
+
+            name_lower = name.lower()
+            matched_path = None
+
+            if name_lower in candidate_map:
+                candidates = candidate_map[name_lower]
+                if len(candidates) == 1:
+                    matched_path = candidates[0]
+                else:
+                    for c_path in candidates:
+                        try:
+                            if os.path.getsize(c_path) == size:
+                                matched_path = c_path
+                                break
+                        except OSError:
+                            pass
+                    if not matched_path:
+                        matched_path = candidates[0]
+
+            if matched_path:
+                if matched_path not in video_queue:
+                    video_queue.append(matched_path)
+                    added_paths.append(matched_path)
+            else:
+                unresolved_names.append(name)
+
+        if added_paths and len(video_queue) == len(added_paths):
+            Thread(target=load_preview_frame, args=(video_queue[0],), daemon=True).start()
+
+    return {
+        "success": len(added_paths) > 0,
+        "added_paths": added_paths,
+        "unresolved_names": unresolved_names
+    }
 
 @eel.expose
 def clear_roi():
@@ -802,12 +951,17 @@ def batch_processing_worker(settings):
         sync_running = True
         def state_sync_thread():
             while sync_running:
-                shared_state['stop_requested'] = stop_requested
-                shared_state['skip_video_path'] = skip_video_path
-                shared_state['player_state'] = player_state
-                shared_state['live_settings'] = global_live_settings
-                shared_state['roi_points'] = roi_points
-                shared_state['scale_info'] = scale_info
+                try:
+                    shared_state['stop_requested'] = stop_requested
+                    shared_state['skip_video_path'] = skip_video_path
+                    shared_state['player_state'] = player_state
+                    shared_state['live_settings'] = global_live_settings
+                    shared_state['roi_points'] = roi_points
+                    shared_state['scale_info'] = scale_info
+                except (BrokenPipeError, EOFError, ConnectionResetError, FileNotFoundError, OSError):
+                    break
+                except Exception:
+                    break
                 time.sleep(0.05)
                 
         threading.Thread(target=state_sync_thread, daemon=True).start()
@@ -876,10 +1030,17 @@ def batch_processing_worker(settings):
             # Watchdog loop: wait for process to finish or crash, while staying responsive to stop requests
             while p.is_alive():
                 if stop_requested:
-                    shared_state['stop_requested'] = True
+                    try:
+                        shared_state['stop_requested'] = True
+                    except Exception:
+                        pass
                 p.join(timeout=0.5)
             
-            requested_path = shared_state['skip_video_path']
+            requested_path = None
+            try:
+                requested_path = shared_state.get('skip_video_path', None)
+            except Exception:
+                pass
             if p.exitcode != 0:
                 write_report(f"❌ 分析狀態: 致命錯誤 (離開代碼: {p.exitcode}，看門狗已介入)\n")
             elif stop_requested:
@@ -1033,6 +1194,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         fps = float(stream.average_rate) if stream.average_rate else 30.0
         if fps <= 0: fps = 30.0
         occlusion_grace_frames = max(1, int(fps * tracker_occlusion_grace_seconds(tracker_mode)))
+        reidentify_grace_msec = int(CONFIG.TRACK_REIDENTIFY_GRACE_SEC * 1000)
         
         total_frames = stream.frames
         if total_frames <= 0:
@@ -1049,6 +1211,8 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         capture_mode, fast_mode = settings.get('captureMode', ''), settings.get('fastMode', True)
         filter_stationary = settings.get('filterStationary', True)
         skip_sec = float(settings.get('skipSec', 0.20))
+        inference_size = int(settings.get('inferenceSize', 960))
+        rider_assist = bool(settings.get('riderAssist', True))
         static_skip_step = max(1, int(fps * skip_sec))
         
         track_states, id_alias_map = {}, {}
@@ -1257,7 +1421,9 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     
                     annotated = frame.copy()
                     if real_roi_poly is not None:
-                        cv2.polylines(annotated, [real_roi_poly], True, (0, 255, 0), 2)
+                        # 雙層高對比輪廓 (黑底 4px + 螢光綠 2px)
+                        cv2.polylines(annotated, [real_roi_poly], True, (0, 0, 0), 4)
+                        cv2.polylines(annotated, [real_roi_poly], True, (0, 255, 128), 2)
                     
                     if req_capture:
                         save_legal_screenshot(annotated, output_dir, time_code_str, ["Manual Capture"], clean_v_name)
@@ -1291,6 +1457,8 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     'classes': class_vars,
                     'captureMode': capture_mode,
                     'filterStationary': filter_stationary,
+                    'inferenceSize': inference_size,
+                    'riderAssist': rider_assist,
                 })
                 conf_thresh = live_values['confThresh']
                 fast_mode = live_values['fastMode']
@@ -1298,6 +1466,8 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                 class_vars = live_values['classes']
                 capture_mode = live_values['captureMode']
                 filter_stationary = live_values['filterStationary']
+                inference_size = int(live_values.get('inferenceSize', 960))
+                rider_assist = bool(live_values.get('riderAssist', True))
                 static_skip_step = max(1, int(fps * skip_sec))
                 
                 # 依據動態狀態切換解碼模式
@@ -1347,81 +1517,114 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     eel.updateProgress(min(100, (target_frame_idx / total_frames) * 100), time_code_str)
                     last_progress_update = now
 
-                # ---------------- YOLO Detection ----------------
+                # ---------------- YOLO Detection (高解析推論 + 視角/小目標特化) ----------------
+                track_kwargs = {'conf': conf_thresh, 'verbose': False}
+                if inference_size and inference_size != 640:
+                    track_kwargs['imgsz'] = inference_size
+
                 if is_dynamic_mode:
                     results = model.track(
                         frame,
                         persist=True,
                         tracker=tracker_config,
-                        verbose=False,
-                        conf=conf_thresh,
+                        **track_kwargs,
                     )[0]
                 else:
-                    results = model.predict(frame, verbose=False, conf=conf_thresh)[0]
+                    results = model.predict(frame, **track_kwargs)[0]
                     
                 boxes = results.boxes
                 annotated_frame = frame.copy()
                 valid_targets = []
 
                 if boxes is not None:
+                    moto_or_bike_enabled = class_vars.get("3", True) or class_vars.get("1", True)
                     for box in boxes:
                         conf = float(box.conf[0])
                         if conf < conf_thresh:
                             continue
                         cls_id = int(box.cls[0])
-                        if cls_id not in CONFIG.TARGET_CLASSES or not class_vars.get(str(cls_id), True):
+
+                        # 智慧正面/多角度騎士關聯補償：
+                        # 若為 Person (0) 但使用者勾選了機車/單車，且長寬比呈騎乘特徵 (h/w >= 1.1)
+                        is_likely_rider = False
+                        if rider_assist and cls_id == 0 and moto_or_bike_enabled and not class_vars.get("0", False):
+                            xyxy_tmp = box.xyxy[0].cpu().numpy()
+                            w_tmp = max(1, xyxy_tmp[2] - xyxy_tmp[0])
+                            h_tmp = max(1, xyxy_tmp[3] - xyxy_tmp[1])
+                            aspect_ratio = h_tmp / w_tmp
+                            if 1.1 <= aspect_ratio <= 3.2:
+                                is_likely_rider = True
+
+                        if cls_id not in CONFIG.TARGET_CLASSES:
+                            continue
+                        if not class_vars.get(str(cls_id), True) and not is_likely_rider:
                             continue
 
                         raw_tid = int(box.id[0]) if box.id is not None else 0
                         tid = id_alias_map.get(raw_tid, raw_tid) if raw_tid != 0 else 0
                         xyxy = box.xyxy[0].cpu().numpy()
                         x1, y1, x2, y2 = map(int, xyxy)
-                        centroid = ((x1 + x2) / 2, y2)
 
                         inside_roi = True
                         if real_roi_poly is not None:
-                            dist = cv2.pointPolygonTest(real_roi_poly, centroid, False)
-                            inside_roi = dist >= 0
+                            pts_to_test = [
+                                ((x1 + x2) / 2.0, float(y2)),
+                                ((x1 + x2) / 2.0, (y1 + y2) / 2.0),
+                                (float(x1), float(y2)),
+                                (float(x2), float(y2)),
+                                ((x1 + x2) / 2.0, float(y1)),
+                            ]
+                            inside_roi = any(cv2.pointPolygonTest(real_roi_poly, pt, False) >= 0 for pt in pts_to_test)
+                            if not inside_roi and len(real_roi_poly) > 0:
+                                for rpt in real_roi_poly:
+                                    rx, ry = rpt[0], rpt[1]
+                                    if x1 <= rx <= x2 and y1 <= ry <= y2:
+                                        inside_roi = True
+                                        break
 
                         if inside_roi:
-                            valid_targets.append({'tid': tid, 'raw_tid': raw_tid, 'conf': conf, 'cls_id': cls_id, 'xyxy': (x1, y1, x2, y2)})
+                            target_cls = 3 if (is_likely_rider and class_vars.get("3", True)) else cls_id
+                            valid_targets.append({'tid': tid, 'raw_tid': raw_tid, 'conf': conf, 'cls_id': target_cls, 'xyxy': (x1, y1, x2, y2)})
 
-                # ---------------- Filter Overlapping Targets ----------------
+                # ---------------- Filter Overlapping Targets (人車合一與精準去重) ----------------
                 drop_indices = set()
                 for i in range(len(valid_targets)):
                     if i in drop_indices: continue
                     t1 = valid_targets[i]
                     x1_1, y1_1, x2_1, y2_1 = t1['xyxy']
-                    area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+                    area1 = max(1, (x2_1 - x1_1) * (y2_1 - y1_1))
                     
                     for j in range(i + 1, len(valid_targets)):
                         if j in drop_indices: continue
                         t2 = valid_targets[j]
                         x1_2, y1_2, x2_2, y2_2 = t2['xyxy']
-                        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+                        area2 = max(1, (x2_2 - x1_2) * (y2_2 - y1_2))
                         
                         ix1, iy1 = max(x1_1, x1_2), max(y1_1, y1_2)
                         ix2, iy2 = min(x2_1, x2_2), min(y2_1, y2_2)
                         iw, ih = max(0, ix2 - ix1), max(0, iy2 - iy1)
                         inter_area = iw * ih
                         if inter_area > 0:
-                            is_rider = (t1['cls_id'] == 0 and t2['cls_id'] in [1, 3]) or (t1['cls_id'] in [1, 3] and t2['cls_id'] == 0)
-                            threshold = 0.15 if is_rider else 0.6
-                            
-                            if inter_area / min(area1, area2) > threshold:
-                                # 優先保留車輛 (cls_id != 0)，並以信心度為輔助判斷
-                                score1 = 10 if t1['cls_id'] != 0 else 0
-                                score2 = 10 if t2['cls_id'] != 0 else 0
-                                score1 += t1['conf']
-                                score2 += t2['conf']
-                                
-                                if score1 > score2:
-                                    drop_indices.add(j)
-                                    t1['xyxy'] = (min(x1_1, x1_2), min(y1_1, y1_2), max(x2_1, x2_2), max(y2_1, y2_2))
-                                else:
-                                    drop_indices.add(i)
-                                    t2['xyxy'] = (min(x1_1, x1_2), min(y1_1, y1_2), max(x2_1, x2_2), max(y2_1, y2_2))
-                                    break
+                            is_rider = (t1['cls_id'] == 0 and t2['cls_id'] in [1, 2, 3, 5, 7]) or (t1['cls_id'] in [1, 2, 3, 5, 7] and t2['cls_id'] == 0)
+                            overlap_ratio = inter_area / min(area1, area2)
+                            if is_rider:
+                                if overlap_ratio > 0.15:
+                                    if t1['cls_id'] != 0:
+                                        drop_indices.add(j)
+                                        t1['xyxy'] = (min(x1_1, x1_2), min(y1_1, y1_2), max(x2_1, x2_2), max(y2_1, y2_2))
+                                    else:
+                                        drop_indices.add(i)
+                                        t2['xyxy'] = (min(x1_1, x1_2), min(y1_1, y1_2), max(x2_1, x2_2), max(y2_1, y2_2))
+                                        break
+                            else:
+                                union_area = area1 + area2 - inter_area
+                                iou = inter_area / union_area if union_area > 0 else 0
+                                if iou > 0.88:
+                                    if t1['conf'] >= t2['conf']:
+                                        drop_indices.add(j)
+                                    else:
+                                        drop_indices.add(i)
+                                        break
                                 
                 final_targets = []
                 for i, t in enumerate(valid_targets):
@@ -1475,7 +1678,10 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             pass
                         continue
                     else:
-                        _run_grace_period_gc(milliseconds, track_states, capture_mode, output_dir, clean_v_name)
+                        _run_grace_period_gc(
+                            milliseconds, track_states, capture_mode, output_dir, clean_v_name,
+                            filter_stationary, reidentify_grace_msec,
+                        )
                         if is_raw_stream:
                             target_frame_idx += 1  # Raw 流靜態模式：每幀前進 1
                         else:
@@ -1507,7 +1713,10 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             target_frame_idx += 1
                         else:
                             target_frame_idx += static_skip_step
-                        _run_grace_period_gc(milliseconds, track_states, capture_mode, output_dir, clean_v_name)
+                        _run_grace_period_gc(
+                            milliseconds, track_states, capture_mode, output_dir, clean_v_name,
+                            filter_stationary, reidentify_grace_msec,
+                        )
                         
                         # 退出動態模式：推送最後一幀讓使用者看到
                         _now = time.time()
@@ -1546,7 +1755,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                                 continue
                             
                             time_diff = milliseconds - old_state['last_seen_msec']
-                            if 0 < time_diff <= 1500:
+                            if 0 < time_diff <= reidentify_grace_msec:
                                 old_cx, old_cy = old_state.get('last_centroid', (cx, cy))
                                 dist = math.hypot(cx - old_cx, cy - old_cy)
                                 last_w, last_h = old_state.get('last_box_size', (w, h))
@@ -1580,6 +1789,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                                 'last_box_size': (w, h),
                                 'start_centroid': (cx, cy),
                                 'is_moving': False,
+                                'motion_confirmations': 0,
                                 'entry_captured': False
                             }
                             
@@ -1599,18 +1809,9 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             state['best_summary'] = [f"{summary_str}({conf:.2f} Peak)"]
                             state['best_target_info'] = target.copy()
                             
-                        if not state['is_moving']:
-                            # 比較與初始位置的總位移，避免 YOLO 邊界框的單幀抖動被誤判為移動
-                            start_cx, start_cy = state['start_centroid']
-                            dist = math.hypot(cx - start_cx, cy - start_cy)
-                            sw, sh = state['start_box_size']
-                            size_diff = max(abs(w - sw), abs(h - sh))
-                            
-                            # 必須與初始狀態相差 12 像素，或是大小改變 15 像素，才確認為真實移動
-                            if dist > 12 or size_diff > 15:
-                                state['is_moving'] = True
-                                dlog(f"[DEBUG-MOVE] ID:{tid} {state['class_name']} 移動! dist={dist:.1f} size_diff={size_diff}")
-                                eel.appendLog(f"[{time_code_str}] ID:{tid} {state['class_name']} 偵測到移動 (累積位移:{dist:.1f}px, 形變:{size_diff}px)", "info")
+                        if not state['is_moving'] and record_motion_observation(state, (cx, cy), (w, h)):
+                            dlog(f"[DEBUG-MOVE] ID:{tid} {state['class_name']} 已確認移動")
+                            eel.appendLog(f"[{time_code_str}] ID:{tid} {state['class_name']} 已確認移動，開始蒐證", "info")
                         state['prev_centroid'] = (cx, cy)
                                 
                         if state['is_moving'] and not state['entry_captured']:
@@ -1649,7 +1850,10 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     push_frame_to_ui(frame, valid_targets, real_roi_poly, time_code_str)
                     
                 # 每幀都執行 GC，確保已移動物件在消失後立即儲存截圖
-                _run_grace_period_gc(milliseconds, track_states, capture_mode, output_dir, clean_v_name, filter_stationary)
+                _run_grace_period_gc(
+                    milliseconds, track_states, capture_mode, output_dir, clean_v_name,
+                    filter_stationary, reidentify_grace_msec,
+                )
 
                 target_frame_idx += 1 
 
@@ -1716,10 +1920,13 @@ def push_frame_to_ui(frame, valid_targets=[], roi_poly=None, time_code_str=""):
 
     eel.setPreviewImage(b64_str, info_obj, json_boxes, roi_pts, time_code_str)()
 
-def _run_grace_period_gc(curr_msec, track_states, capture_mode, output_dir, prefix_name, filter_stationary=True):
+def _run_grace_period_gc(
+    curr_msec, track_states, capture_mode, output_dir, prefix_name,
+    filter_stationary=True, reidentify_grace_msec=1500,
+):
     expired_ids = []
     for tid, state in track_states.items():
-        if (curr_msec - state['last_seen_msec']) > 1500:
+        if (curr_msec - state['last_seen_msec']) > reidentify_grace_msec:
             expired_ids.append(tid)
     for tid in expired_ids:
         state = track_states[tid]
