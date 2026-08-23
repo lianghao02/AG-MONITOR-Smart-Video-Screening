@@ -1,7 +1,8 @@
 ﻿[CmdletBinding()]
 param(
     [string]$TargetProject = '',
-    [switch]$NoLaunch
+    [switch]$NoLaunch,
+    [switch]$Force
 )
 
 $ErrorActionPreference = 'Stop'
@@ -39,12 +40,17 @@ Write-Host "🚀 【智慧自癒啟動系統】專案：$projectName" -Foregroun
 Write-Host '=================================================================' -ForegroundColor Cyan
 
 # ----------------------------------------------------------------------
-# 階段 ①：檢查是否已具備現成的 Python 可攜環境 (場景 1：隨身碟 / 已就緒)
+# 階段 1：檢查是否已具備現成的 Python 可攜環境 (嚴格驗證)
 # ----------------------------------------------------------------------
 $isEnvironmentReady = $false
+
+if ($Force -and (Test-Path -LiteralPath $embedDir)) {
+    Write-Host "[強制重建] 偵測到 -Force 參數，正在重置環境..." -ForegroundColor Magenta
+    Remove-Item -LiteralPath $embedDir -Recurse -Force
+}
+
 if (Test-Path -LiteralPath $embedPython) {
-    # 測試執行並驗證
-    $testRun = & "$embedPython" -c "import sys; print('READY')" 2>$null
+    $testRun = & "$embedPython" -c "import sys, sqlite3; print('READY')" 2>$null
     if ($testRun -match 'READY') {
         $isEnvironmentReady = $true
     }
@@ -113,6 +119,26 @@ if (-not $isEnvironmentReady) {
         )
         $asciiBytes = [System.Text.Encoding]::ASCII.GetBytes(($pthLines -join "`r`n") + "`r`n")
         [System.IO.File]::WriteAllBytes($pthFile.FullName, $asciiBytes)
+    }
+
+    $targetSqlitePyd = Join-Path $embedDir '_sqlite3.pyd'
+    if (-not (Test-Path -LiteralPath $targetSqlitePyd)) {
+        $sqliteSources = @(
+            (Join-Path (Split-Path -Parent $projectDir) "06_System-Optimizer-Tool\python_embed\_sqlite3.pyd"),
+            (Join-Path (Split-Path -Parent $projectDir) "07_auto-learning-bot\python_embed\_sqlite3.pyd"),
+            (Join-Path $env:LOCALAPPDATA "Programs\Python\Python313\DLLs\_sqlite3.pyd"),
+            (Join-Path $env:LOCALAPPDATA "Programs\Python\Python311\DLLs\_sqlite3.pyd")
+        )
+        foreach ($src in $sqliteSources) {
+            if ($src -and (Test-Path -LiteralPath $src)) {
+                Copy-Item -LiteralPath $src -Destination $targetSqlitePyd -Force
+                $srcDll = Join-Path (Split-Path -Parent $src) 'sqlite3.dll'
+                if (Test-Path -LiteralPath $srcDll) {
+                    Copy-Item -LiteralPath $srcDll -Destination (Join-Path $embedDir 'sqlite3.dll') -Force
+                }
+                break
+            }
+        }
     }
 
     # 配置 get-pip.py
