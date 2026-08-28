@@ -172,4 +172,59 @@
 ## 剩餘問題
 
 - 動態引導初始門檻只作保守起點；待取得夜間眩光與雨天實體片段後，才可依誤報與漏檢量測結果調整。
-- 四個 YOLO11／12 權重未納入版本庫；權重放入後須逐一完成啟動、推論與 CPU／GPU 記憶體量測。
+- YOLO11／12 權重不納入版本庫，僅由建置器依官方 SHA-256 驗證後放入 Release；v4.0.0 為 CPU 發行版，GPU 記憶體量測留待獨立 CUDA 版本。
+
+---
+
+# P5 v4.0.0 完整離線發行計畫
+
+## 目標與驗收條件
+
+- 產出 Windows 10／11 x64 CPU 通用可攜包，使用者不需安裝 Python、pip、CUDA 或開發工具。
+- 發行包內含 `yolov8n.pt` 相容回退，以及 `yolo11n.pt`、`yolo11s.pt`、`yolo12n.pt`、`yolo12s.pt` 四個完整模型；首次啟動不得連線下載模型或套件。
+- 採資料夾型 Python 嵌入式 Runtime 與小型 WinExe 啟動器，不使用 PyInstaller 單檔自解壓。
+- 程式放在 `current/`，使用者輸出固定放在外層 `data/captures/`；後續更新程式時不得覆蓋截圖。
+- 建置產物包含完整檔案清單、SHA-256、ZIP 雜湊、版本與來源 Git commit。
+- 從全新含中文與空白的路徑解壓後，完成 Runtime 匯入、五模型 CPU 推論、Eel 介面啟動及合成影片 Headless 分析。
+- GitHub 建立 `v4.0.0` Tag 與正式 Release，附完整可攜 ZIP、ZIP SHA-256 及台灣繁體中文發布說明。
+
+## 不做範圍
+
+- v4.0.0 不提供 CUDA Runtime；NVIDIA GPU 發行包待獨立量測後另案處理。
+- 不將模型、`python_embed/`、`dist/`、截圖或測試影片提交至 Git Repository。
+- 不使用單檔自解壓包，也不宣稱未簽章執行檔可避開所有 SmartScreen 或機關端點政策。
+
+## 已確認決策
+
+- 完整包採 `07_auto-learning-bot` 的可攜架構概念，但使用 AG-MONITOR 專屬建置腳本、依賴鎖定、模型驗證與資料路徑。
+- 公開原始碼與完整執行包採 GNU AGPL-3.0，並提供第三方元件及模型授權聲明。
+- GitHub Release 資產使用純 ASCII 名稱：`AG-MONITOR-Smart-Video-Screening-v4.0.0-win-x64-portable.zip`。
+- 中央 `7_建置所有桌面應用程式.bat` 只負責選單與調度；實際建置邏輯由本專案 `scripts/build_portable_release.py` 負責。
+
+## 工作清單
+
+- [x] P5-1 版本與授權｜新增 `version.txt`、AGPL-3.0、第三方聲明並更新 README／CHANGELOG。
+- [x] P5-2 資料隔離｜支援 `AG_MONITOR_DATA_DIR`，將可攜版截圖、Ultralytics、Matplotlib 與啟動日誌放入 `data/`。
+- [x] P5-3 發行建置器｜建立 Runtime 精簡複製、模型雜湊、啟動器、清冊、ZIP 與 SHA-256 流程。
+- [x] P5-4 中央腳本｜更新 Repository 清單、Python 環境清單與桌面發行選單，支援首次建立 Release。
+- [x] P5-5 五模型驗證｜逐一完成 CPU 載入與合成影像推論。
+- [ ] P5-6 可攜包驗證｜全新路徑完成 Runtime、介面與合成影片 Headless 測試。
+- [ ] P5-7 正式發布｜通過交付檢核後 commit、push、建立 `v4.0.0` Tag 與正式 Release。
+
+## 風險與因應
+
+- CPU Runtime 未壓縮約 1.3 GB：ZIP 使用一般 Deflate 並驗證低於 GitHub 單一資產 2 GiB 限制。
+- 模型或套件供應端變動：所有發行模型固定 SHA-256，Runtime 套件版本以 `requirements-release.txt` 鎖定並於建置時比對。
+- Eel 啟動錯誤在 `pythonw.exe` 下不可見：根目錄保留批次啟動器，先執行匯入檢查並將錯誤寫入 `data/logs/startup_error.log`。
+- GitHub 首次沒有 Tag／Release：中央腳本必須先 `gh release create`；只有既有 Release 才可走資產更新，禁止盲目 `--clobber`。
+
+## 驗證紀錄
+
+- 2026-08-28：確認目前 Runtime 為 Python 3.13.0、Torch 2.13.0 CPU，未啟用 CUDA。
+- 2026-08-28：自 Ultralytics 官方 `v8.3.0` Release 取得 YOLO11n／11s／12n／12s；權重維持 Git 忽略，只進入發行包。
+- 2026-08-28：完成 376.36 MB 預備可攜包；五個模型均成功以 Torch CPU 完成合成影像 detect 推論，並確認 PyTorch 編譯標頭不進入 Runtime、深層第三方授權檔改以短路徑攤平保存。
+- 2026-08-28：交付檢核發現受限 AppData 會使啟動前 Ultralytics 匯入失敗，已將 EXE／BAT 啟動器的 YOLO 與 Matplotlib 設定一併隔離至 `data/captures/`。
+
+## 剩餘問題
+
+- 尚待完整建置、乾淨解壓測試與正式 Release 發布後收斂。

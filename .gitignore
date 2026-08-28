@@ -5,6 +5,7 @@ debug.log
 .antigravity/
 python-embed/
 python_embed/
+dist/
 
 # AI 權重與模型檔案
 *.pt
@@ -14,3 +15,4 @@ yolov8n.pt
 # 實體測試影片與輸出資料夾（避免大型資料進入版本庫）
 input_videos/
 captures/
+data/

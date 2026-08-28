@@ -2,6 +2,14 @@
 
 技術識別名稱：`AG-MONITOR-Smart-Video-Screening`
 
+目前正式版本：`v4.0.0`
+
+## 完整可攜版
+
+一般使用者可從 [GitHub Releases](https://github.com/lianghao02/AG-MONITOR-Smart-Video-Screening/releases/latest) 下載 `AG-MONITOR-Smart-Video-Screening-v4.0.0-win-x64-portable.zip`。完整解壓後執行 `AG-MONITOR.exe`，不需另行安裝 Python、pip、CUDA 或模型。
+
+可攜版內含 CPU 通用 Runtime、YOLOv8n 相容回退，以及 YOLO11n／11s／12n／12s 四個模型。使用者截圖與執行紀錄放在外層 `data/`，不會與程式檔案混在一起。
+
 ## 技術架構現況（2026-08-24）
 
 本專案主力為 **Python 3.13**，以 PyAV、OpenCV、Ultralytics YOLO 與 LAP 組成智慧影像快篩與 AI 追蹤管線。因模型、影音解碼與演算法調校高度依賴 Python 生態系，現階段不進行 C#、Rust 或 Web 重寫；未來僅在量測出明確瓶頸時評估將個別 CPU 密集元件抽換為原生核心。
@@ -12,7 +20,7 @@
 - **核心套件**：PyAV、Eel、OpenCV、Ultralytics YOLO、lap；完整固定版本見 `requirements.txt`，可攜版補充套件見 `portable-requirements.txt`。
 - **推薦啟動**：下載並解壓完整專案後雙擊 `RUN.bat`。若沒有 Python，`setup_and_run.ps1` 會建立專案內的 `python_embed` 並安裝依賴。
 - **手動安裝**：`py -3.13 -m venv .venv`，啟用後執行 `python -m pip install -r requirements.txt`，再執行 `python main.py`。
-- **網路需求**：首次建立環境、安裝套件或取得 YOLO 模型時需要網路；已備妥 `python_embed`、套件與模型後可離線啟動。
+- **網路需求**：原始碼首次建立環境、安裝套件或取得 YOLO 模型時需要網路；GitHub Release 完整可攜版可離線啟動。
 - **打包／移機**：保留完整專案與已建好的 `python_embed`；不要只複製 `main.py`。模型與原始影片不應提交至 GitHub。
 
 ## 專案簡介
@@ -63,6 +71,12 @@ python_embed\python.exe -B tests\test_real_videos.py -v
 - **Eel** (輕量化 WebSocket 前後端通訊與現代化 UI 渲染)
 
 後續功能規劃與實作紀錄請參閱 [`docs/FUTURE_ROADMAP.md`](docs/FUTURE_ROADMAP.md) 與 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)。
+
+## 授權與公開聲明
+
+本專案以 [GNU Affero General Public License v3.0](LICENSE) 公開。發行包包含多項第三方開放原始碼元件與 Ultralytics YOLO 模型；個別著作權與授權資訊請參閱 [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。
+
+本工具僅供影像快速篩選與人工研判輔助，不保證偵測結果零漏失或零誤報，也不取代原始影片、依法定程序保存的資料或承辦人專業判斷。
 
 ## 快篩安全與驗證補充
 

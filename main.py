@@ -1,4 +1,8 @@
 import os
+_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+_DATA_DIR = os.path.abspath(os.environ.get("AG_MONITOR_DATA_DIR", _APP_DIR))
+_CAPTURES_DIR = os.path.join(_DATA_DIR, "captures")
+_LOGS_DIR = os.path.join(_DATA_DIR, "logs")
 os.environ["OPENCV_FFMPEG_LOG_LEVEL"] = "-1"
 os.environ["PYAV_LOGGING"] = "off"
 os.environ["YOLO_VERBOSE"] = "False"
@@ -7,14 +11,15 @@ os.environ["YOLO_OFFLINE"] = "True"
 # 依賴或污染目前 Windows 使用者的 AppData 設定。
 os.environ.setdefault(
     "YOLO_CONFIG_DIR",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures", ".ultralytics"),
+    os.path.join(_CAPTURES_DIR, ".ultralytics"),
 )
 os.environ.setdefault(
     "MPLCONFIGDIR",
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures", ".matplotlib"),
+    os.path.join(_CAPTURES_DIR, ".matplotlib"),
 )
 os.makedirs(os.environ["YOLO_CONFIG_DIR"], exist_ok=True)
 os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
+os.makedirs(_LOGS_DIR, exist_ok=True)
 import cv2
 import numpy as np
 import time
@@ -44,7 +49,7 @@ import gc
 from ultralytics import YOLO
 
 # ===== DEBUG 診斷日誌 (寫入檔案，因為 eel 會攔截 stdout) =====
-_DEBUG_LOG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "debug.log")
+_DEBUG_LOG_PATH = os.path.join(_LOGS_DIR, "debug.log")
 def dlog(msg):
     try:
         with open(_DEBUG_LOG_PATH, "a", encoding="utf-8") as _f:
@@ -78,8 +83,9 @@ def safe_base64_decode(base64_str, max_bytes=50 * 1024 * 1024):
         return None, f"Base64 解碼失敗: {err}"
 
 class CONFIG:
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    CAPTURES_DIR = os.path.join(BASE_DIR, "captures")
+    BASE_DIR = _APP_DIR
+    DATA_DIR = _DATA_DIR
+    CAPTURES_DIR = _CAPTURES_DIR
     APP_TITLE = "AG-MONITOR 智慧影像快篩系統"
     
     SMART_SKIP_SEC = 3.0   
@@ -173,7 +179,7 @@ def resolve_tracker_config(settings):
 
 def resolve_model_name(settings, require_file=False):
     """只允許載入明確支援的本機模型權重，避免任意路徑注入。"""
-    model_name = os.path.basename(str(settings.get("aiModel", "yolov8n.pt")))
+    model_name = os.path.basename(str(settings.get("aiModel", "yolo11n.pt")))
     if model_name not in CONFIG.MODEL_ALLOWLIST:
         raise ValueError(f"不支援的 AI 模型: {model_name}")
     model_path = os.path.join(CONFIG.BASE_DIR, model_name)
