@@ -9,7 +9,12 @@ os.environ.setdefault(
     "YOLO_CONFIG_DIR",
     os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures", ".ultralytics"),
 )
+os.environ.setdefault(
+    "MPLCONFIGDIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "captures", ".matplotlib"),
+)
 os.makedirs(os.environ["YOLO_CONFIG_DIR"], exist_ok=True)
+os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
 import cv2
 import numpy as np
 import time
@@ -18,17 +23,12 @@ import csv
 import hashlib
 import json
 import math
+import queue
 import re
-import shutil
-import urllib.request
-import zipfile
 import subprocess
-import tempfile
 from datetime import datetime, timedelta
-from pathlib import Path
 import threading
 from threading import Thread
-from PIL import Image, ImageDraw, ImageFont
 import eel
 try:
     import tkinter as tk
@@ -80,7 +80,7 @@ def safe_base64_decode(base64_str, max_bytes=50 * 1024 * 1024):
 class CONFIG:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     CAPTURES_DIR = os.path.join(BASE_DIR, "captures")
-    APP_TITLE = "AG-MONITOR 科技偵查戰術播放器"
+    APP_TITLE = "AG-MONITOR 智慧影像快篩系統"
     
     SMART_SKIP_SEC = 3.0   
     MOTION_THRESH = 25     
@@ -93,6 +93,17 @@ class CONFIG:
     BOTSORT_REID_OCCLUSION_GRACE_SEC = 6.0
     TRACK_REIDENTIFY_GRACE_SEC = 3.0
     MOTION_CONFIRMATION_FRAMES = 2
+    MOTION_GUIDE_MIN_AREA = 500
+    MOTION_GUIDE_CONFIRMATION_FRAMES = 2
+    MOTION_GUIDE_BASE_CONF = 0.35
+    MOTION_GUIDE_COMPENSATED_CONF = 0.18
+    CAPTURE_QUEUE_SIZE = 8
+    CAPTURE_JPEG_QUALITY = 95
+    MODEL_ALLOWLIST = {
+        "yolov8n.pt", "yolov8s.pt",
+        "yolo11n.pt", "yolo11s.pt",
+        "yolo12n.pt", "yolo12s.pt",
+    }
     TRACKER_CONFIGS = {
         "bytetrack": os.path.join(BASE_DIR, "trackers", "ag_bytetrack.yaml"),
         "botsort_reid": os.path.join(BASE_DIR, "trackers", "ag_botsort_reid.yaml"),
@@ -110,25 +121,16 @@ roi_points = []
 scale_info = None 
 is_processing = False
 stop_requested = False
+force_stop_requested = False
 skip_video_path = None
 model = None
 current_model_name = None
 list_lock = threading.Lock()
 global_live_settings = {}
-current_report_path = None
-
-def write_report(msg):
-    global current_report_path
-    if not current_report_path: return
-    try:
-        with open(current_report_path, "a", encoding="utf-8") as f:
-            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
-    except Exception:
-        pass
 
 
 def calculate_sha256(file_path, chunk_size=CONFIG.HASH_CHUNK_SIZE):
-    """以串流方式計算證物雜湊，避免大型監視器影片占滿記憶體。"""
+    """以串流方式計算檔案雜湊，避免大型監視器影片占滿記憶體。"""
     digest = hashlib.sha256()
     with open(file_path, "rb") as file_obj:
         while chunk := file_obj.read(chunk_size):
@@ -137,7 +139,7 @@ def calculate_sha256(file_path, chunk_size=CONFIG.HASH_CHUNK_SIZE):
 
 
 def build_evidence_metadata(file_path):
-    """建立可寫入鑑識紀錄的原始證物識別資料。"""
+    """僅供安全重新命名交易驗證使用，不由影片分析流程呼叫。"""
     absolute_path = os.path.abspath(file_path)
     stat = os.stat(absolute_path)
     return {
@@ -169,6 +171,17 @@ def resolve_tracker_config(settings):
     return tracker_mode, tracker_path
 
 
+def resolve_model_name(settings, require_file=False):
+    """只允許載入明確支援的本機模型權重，避免任意路徑注入。"""
+    model_name = os.path.basename(str(settings.get("aiModel", "yolov8n.pt")))
+    if model_name not in CONFIG.MODEL_ALLOWLIST:
+        raise ValueError(f"不支援的 AI 模型: {model_name}")
+    model_path = os.path.join(CONFIG.BASE_DIR, model_name)
+    if require_file and not os.path.isfile(model_path):
+        raise FileNotFoundError(f"找不到模型權重: {model_name}")
+    return model_name
+
+
 def tracker_occlusion_grace_seconds(tracker_mode):
     """ReID 必須維持足夠長的連續追蹤，才能跨越三秒以上遮蔽。"""
     if tracker_mode == "botsort_reid":
@@ -180,8 +193,7 @@ def resolve_live_processing_settings(live_settings, current_settings):
     """合併分析中的即時設定；未變更欄位沿用目前值。"""
     resolved = current_settings.copy()
     for key in (
-        "confThresh", "fastMode", "skipSec", "classes", "captureMode",
-        "filterStationary", "inferenceSize", "riderAssist",
+        "confThresh", "skipSec", "classes", "inferenceSize", "riderAssist",
     ):
         if key in live_settings:
             resolved[key] = live_settings[key]
@@ -218,6 +230,205 @@ def should_trigger_decoder_deadlock(phase, elapsed, timeout=CONFIG.DECODER_DEADL
     return phase == "decoding" and elapsed >= timeout
 
 
+def format_capture_timecode(time_code):
+    """將實際或相對時間碼轉為適合排序的檔名字串。"""
+    matches = re.findall(r"(\d{2}):(\d{2}):(\d{2})", str(time_code))
+    if not matches:
+        return "00h00m00s"
+    hours, minutes, seconds = matches[-1]
+    return f"{hours}h{minutes}m{seconds}s"
+
+
+def _safe_filename_part(value, fallback):
+    # 保留中文等 Unicode 名稱，只替換 Windows 禁止字元與控制字元。
+    cleaned = re.sub(r'[<>:"/\\|?*\x00-\x1F]+', "_", str(value)).strip(" ._")
+    return cleaned or fallback
+
+
+def _target_label(target):
+    class_name = target.get("class_name")
+    if not class_name:
+        class_name = CONFIG.TARGET_CLASSES.get(target.get("cls_id"), "target")
+    return str(class_name).title()
+
+
+def draw_scene_annotations(frame, targets):
+    """只在輸出副本上繪製同一場景的全部目標框。"""
+    annotated = frame.copy()
+    colors = {
+        0: (88, 180, 255), 1: (109, 190, 112), 2: (235, 167, 70),
+        3: (181, 108, 220), 5: (75, 190, 205), 7: (95, 120, 230),
+    }
+    frame_width = annotated.shape[1]
+    thickness = 1 if frame_width < 1280 else 2 if frame_width < 2000 else 3
+    font_scale = 0.45 if frame_width < 1280 else 0.60 if frame_width < 2000 else 0.80
+    for target in targets:
+        x1, y1, x2, y2 = map(int, target["xyxy"])
+        class_id = int(target.get("cls_id", -1))
+        color = colors.get(class_id, (0, 210, 255))
+        track_id = int(target.get("tid", 0))
+        confidence = float(target.get("conf", 0.0))
+        label = f"ID:{track_id} {_target_label(target)} {confidence:.2f}"
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, thickness)
+        cv2.putText(
+            annotated, label, (x1, max(18, y1 - 6)), cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale, color, max(1, thickness - 1), cv2.LINE_AA,
+        )
+    return annotated
+
+
+def save_scene_screenshot(frame, output_dir, time_code, prefix_name, primary_target, targets, burn_annotations=False):
+    """以原解析度寫入全景圖；不產生雜湊、清冊或浮水印。"""
+    os.makedirs(output_dir, exist_ok=True)
+    output_frame = draw_scene_annotations(frame, targets) if burn_annotations else frame
+    target_id = int(primary_target.get("tid", 0))
+    target_type = _safe_filename_part(_target_label(primary_target), "Target")
+    safe_prefix = _safe_filename_part(prefix_name, "video")
+    safe_time = format_capture_timecode(time_code)
+    filename = f"{safe_prefix}_{safe_time}_ID{target_id}_{target_type}.jpg"
+    final_path = os.path.join(output_dir, filename)
+    success, encoded = cv2.imencode(
+        ".jpg", output_frame,
+        [int(cv2.IMWRITE_JPEG_QUALITY), CONFIG.CAPTURE_JPEG_QUALITY],
+    )
+    if not success:
+        return None
+
+    stem, extension = os.path.splitext(final_path)
+    collision_index = 0
+    while True:
+        actual_path = final_path if collision_index == 0 else f"{stem}_{collision_index}{extension}"
+        try:
+            with open(actual_path, "xb") as image_file:
+                image_file.write(encoded.tobytes())
+            return actual_path
+        except FileExistsError:
+            collision_index += 1
+
+
+class CaptureWriter:
+    """有界非同步全景截圖寫入器。"""
+
+    _STOP = object()
+
+    def __init__(self, maxsize=CONFIG.CAPTURE_QUEUE_SIZE, status_callback=None):
+        self._queue = queue.Queue(maxsize=maxsize)
+        self._status_callback = status_callback
+        self._lock = threading.Lock()
+        self._accepting = True
+        self._stats = {"events": 0, "written": 0, "discarded": 0, "errors": 0, "queued": 0, "state": "normal"}
+        self._thread = threading.Thread(target=self._worker, name="capture-writer", daemon=True)
+        self._thread.start()
+
+    def snapshot(self, state=None):
+        with self._lock:
+            result = dict(self._stats)
+            result["queued"] = self._queue.qsize()
+            if state is not None:
+                result["state"] = state
+                self._stats["state"] = state
+        return result
+
+    def _notify(self, state=None):
+        stats = self.snapshot(state)
+        if self._status_callback:
+            try:
+                self._status_callback(stats)
+            except Exception:
+                pass
+
+    def enqueue(self, frame, output_dir, time_code, prefix_name, primary_target, targets, burn_annotations=False):
+        if not self._accepting:
+            return False
+        event = {
+            "frame": frame.copy(), "output_dir": output_dir, "time_code": time_code,
+            "prefix_name": prefix_name, "primary_target": dict(primary_target),
+            "targets": [dict(target) for target in targets],
+            "burn_annotations": bool(burn_annotations),
+        }
+        while self._accepting:
+            try:
+                self._queue.put(event, timeout=0.1)
+                with self._lock:
+                    self._stats["events"] += 1
+                self._notify("normal" if not self._queue.full() else "backpressure")
+                return True
+            except queue.Full:
+                self._notify("backpressure")
+        return False
+
+    def finish(self, flush=True):
+        self._accepting = False
+        if flush:
+            self._notify("flushing")
+            self._queue.join()
+        else:
+            discarded = 0
+            while True:
+                try:
+                    item = self._queue.get_nowait()
+                    if item is not self._STOP:
+                        discarded += 1
+                    self._queue.task_done()
+                except queue.Empty:
+                    break
+            with self._lock:
+                self._stats["discarded"] += discarded
+        self._queue.put(self._STOP)
+        self._thread.join(timeout=5)
+        self._notify("cancelled" if not flush else "completed")
+        return self.snapshot()
+
+    def _worker(self):
+        while True:
+            event = self._queue.get()
+            try:
+                if event is self._STOP:
+                    return
+                path = save_scene_screenshot(**event)
+                with self._lock:
+                    if path:
+                        self._stats["written"] += 1
+                    else:
+                        self._stats["errors"] += 1
+                self._notify()
+            except Exception as error:
+                dlog(f"[CAPTURE-WRITER] 寫入失敗: {error}")
+                with self._lock:
+                    self._stats["errors"] += 1
+                self._notify("error")
+            finally:
+                self._queue.task_done()
+
+
+class MotionGuideDetector:
+    """以 ROI 內連續像素位移判斷是否啟用低門檻補償。"""
+
+    def __init__(self, min_area=CONFIG.MOTION_GUIDE_MIN_AREA, confirmation_frames=CONFIG.MOTION_GUIDE_CONFIRMATION_FRAMES):
+        self.min_area = int(min_area)
+        self.confirmation_frames = int(confirmation_frames)
+        self.previous_gray = None
+        self.confirmations = 0
+
+    def observe(self, frame, roi_poly=None):
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        if self.previous_gray is None:
+            self.previous_gray = gray
+            return False
+        difference = cv2.absdiff(self.previous_gray, gray)
+        self.previous_gray = gray
+        _, mask = cv2.threshold(difference, CONFIG.MOTION_THRESH, 255, cv2.THRESH_BINARY)
+        if roi_poly is not None and len(roi_poly) >= 3:
+            roi_mask = np.zeros_like(mask)
+            cv2.fillPoly(roi_mask, [roi_poly], 255)
+            mask = cv2.bitwise_and(mask, roi_mask)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+        moving = any(cv2.contourArea(contour) >= self.min_area for contour in cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)[0])
+        self.confirmations = self.confirmations + 1 if moving else 0
+        return self.confirmations >= self.confirmation_frames
+
+
 # Player State
 engine_mode = 'auto' # 'auto' or 'manual'
 player_state = {
@@ -225,8 +436,11 @@ player_state = {
     'reverse': False,
     'speed': 1.0,
     'seek_req': None, # 0.0 ~ 100.0 percent
+    'seek_revision': 0,
     'step_req': 0,    # frames to step
+    'step_revision': 0,
     'manual_capture_req': False,
+    'manual_capture_revision': 0,
     'current_frame': None,
     'current_timecode': "",
     'annotated_frame': None
@@ -663,19 +877,22 @@ def set_roi_points(pts):
 def request_stop():
     global stop_requested
     stop_requested = True
-    eel.updateStatus("狀態: 正在要求安全終止...", "warn")
+    eel.updateStatus("狀態: 正在停止並完成截圖寫入...", "warn")
+
+
+@eel.expose
+def request_force_stop():
+    global stop_requested, force_stop_requested
+    force_stop_requested = True
+    stop_requested = True
+    eel.updateStatus("狀態: 正在強制停止，未寫入截圖將捨棄...", "danger")
 
 @eel.expose
 def update_live_setting(key, value):
     global global_live_settings
     old_value = global_live_settings.get(key)
     global_live_settings[key] = value
-    if is_processing and old_value != value:
-        if key == "classes":
-            display_value = format_enabled_classes(value)
-        else:
-            display_value = value
-        write_report(f"⚙️ 執行中設定變更: {key} = {display_value}")
+    return old_value != value
 
 @eel.expose
 def set_engine_mode(mode):
@@ -683,7 +900,7 @@ def set_engine_mode(mode):
     if is_processing:
         return
     engine_mode = mode
-    eel.appendLog(f"已切換至: {'全自動 AI 蒐證' if mode == 'auto' else '即時人眼點視'}", "info")
+    eel.appendLog(f"已切換至: {'全自動 AI 快篩' if mode == 'auto' else '即時人眼點視'}", "info")
 
 # --- Player API ---
 @eel.expose
@@ -707,11 +924,13 @@ def set_speed(s):
 def seek_frame(percent):
     with player_lock:
         player_state['seek_req'] = float(percent)
+        player_state['seek_revision'] = int(player_state.get('seek_revision', 0)) + 1
 
 @eel.expose
 def step_frame(steps):
     with player_lock:
         player_state['step_req'] = int(steps)
+        player_state['step_revision'] = int(player_state.get('step_revision', 0)) + 1
         player_state['playing'] = False
         eel.updatePlayState(player_state['playing'], player_state['reverse'])
 
@@ -719,16 +938,29 @@ def step_frame(steps):
 def manual_capture():
     with player_lock:
         player_state['manual_capture_req'] = True
+        player_state['manual_capture_revision'] = int(player_state.get('manual_capture_revision', 0)) + 1
 
 @eel.expose
 def start_processing(settings):
-    global is_processing, stop_requested, global_live_settings, skip_video_path
+    global is_processing, stop_requested, force_stop_requested, global_live_settings, skip_video_path
+    if is_processing:
+        eel.updateStatus("狀態: 已有分析任務執行中", "warn")
+        return {"success": False, "msg": "已有分析任務執行中"}
     if not video_queue:
         eel.updateStatus("狀態: 清單為空，無法開始", "danger")
-        eel.processingFinished()
-        return
+        return {"success": False, "msg": "清單為空"}
+    try:
+        resolve_model_name(settings, require_file=True)
+        inference_size = int(settings.get("inferenceSize", 960))
+        if inference_size not in {640, 960, 1280}:
+            raise ValueError(f"不支援的推論解析度: {inference_size}")
+        resolve_tracker_config(settings)
+    except (ValueError, FileNotFoundError) as error:
+        eel.updateStatus(f"狀態: {error}", "danger")
+        return {"success": False, "msg": str(error)}
     is_processing = True
     stop_requested = False
+    force_stop_requested = False
     skip_video_path = None
     global_live_settings = settings.copy()
     
@@ -743,7 +975,13 @@ def start_processing(settings):
     if engine_mode == 'manual':
         eel.updatePlayState(player_state['playing'], player_state['reverse'])
         
-    Thread(target=batch_processing_worker, args=(settings,), daemon=True).start()
+    try:
+        Thread(target=batch_processing_worker, args=(settings,), daemon=True).start()
+    except Exception as error:
+        is_processing = False
+        eel.updateStatus(f"狀態: 分析工作無法啟動：{error}", "danger")
+        return {"success": False, "msg": f"分析工作無法啟動：{error}"}
+    return {"success": True}
 
 def load_preview_frame(video_path):
     global scale_info
@@ -819,11 +1057,10 @@ def get_real_roi_polygon():
     return np.array(real_pts, dtype=np.int32)
 
 
-def _configure_worker_context(process_engine_mode, report_path):
+def _configure_worker_context(process_engine_mode):
     """設定 Windows spawn 子程序無法從主程序繼承的必要狀態。"""
-    global engine_mode, current_report_path
+    global engine_mode
     engine_mode = process_engine_mode
-    current_report_path = report_path
 
 
 def process_wrapper(
@@ -835,14 +1072,13 @@ def process_wrapper(
     shared_state,
     model_name,
     process_engine_mode,
-    report_path,
 ):
     import sys
     import threading
     import time
     from ultralytics import YOLO
     
-    global eel, stop_requested, skip_video_path, player_state, global_live_settings
+    global eel, stop_requested, force_stop_requested, skip_video_path, player_state, global_live_settings
     global roi_points, scale_info, model
     
     class MockEel:
@@ -855,21 +1091,21 @@ def process_wrapper(
     eel = MockEel()
     
     stop_requested = False
+    force_stop_requested = False
     skip_video_path = None
     player_state = shared_state.get('player_state', {})
     global_live_settings = shared_state.get('live_settings', {})
     roi_points = shared_state.get('roi_points', [])
     scale_info = shared_state.get('scale_info', None)
     # Windows multiprocessing 使用 spawn，子程序不會繼承主程序的全域狀態。
-    # 模式與鑑識紀錄路徑必須明確傳入，否則人工點視會退回 auto，
-    # 子程序產生的截圖與錯誤也無法寫入本次鑑識紀錄。
-    _configure_worker_context(process_engine_mode, report_path)
+    _configure_worker_context(process_engine_mode)
     
     sub_sync_running = True
     def sub_sync_thread():
-        global stop_requested, skip_video_path, player_state, global_live_settings, roi_points, scale_info
+        global stop_requested, force_stop_requested, skip_video_path, player_state, global_live_settings, roi_points, scale_info
         while sub_sync_running:
             stop_requested = shared_state.get('stop_requested', False)
+            force_stop_requested = shared_state.get('force_stop_requested', False)
             skip_video_path = shared_state.get('skip_video_path', None)
             player_state = shared_state.get('player_state', {})
             global_live_settings = shared_state.get('live_settings', {})
@@ -883,7 +1119,7 @@ def process_wrapper(
     model = YOLO(model_name)
     
     try:
-        process_single_video(video_path, video_name, settings, batch_output_dir)
+        process_single_video(video_path, video_name, settings, batch_output_dir, shared_state)
         sys.exit(0)
     except Exception as e:
         import traceback
@@ -898,61 +1134,44 @@ def process_wrapper(
 def batch_processing_worker(settings):
     global is_processing, model, current_model_name, skip_video_path
     import multiprocessing
-    import queue
     import traceback
     import gc
-    
-    try:
-        model_name = settings.get("aiModel", "yolov8n.pt")
 
+    sync_running = False
+    manager = None
+    summary = {"events": 0, "written": 0, "discarded": 0, "errors": 0, "forced": False, "outputDir": CONFIG.CAPTURES_DIR}
+    try:
+        model_name = resolve_model_name(settings, require_file=True)
         with list_lock:
             q = list(video_queue)
         total_v = len(q)
-
         single_folder = settings.get("singleFolder", False)
         batch_output_dir = None
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        global current_report_path
-
         if single_folder:
             batch_output_dir = os.path.join(CONFIG.CAPTURES_DIR, f"Batch_{timestamp_str}")
             os.makedirs(batch_output_dir, exist_ok=True)
-            current_report_path = os.path.join(batch_output_dir, "系統鑑識紀錄.txt")
-        else:
-            current_report_path = os.path.join(CONFIG.CAPTURES_DIR, f"系統鑑識紀錄_{timestamp_str}.txt")
-            
-        write_report("=== AG-MONITOR 科技偵查戰術分析紀錄 ===")
-        write_report(f"AI 核心模型: {model_name}")
-        write_report(f"執行模式: {engine_mode}")
-        tracker_mode, tracker_config = resolve_tracker_config(settings)
-        write_report(f"追蹤核心: {CONFIG.TRACKER_LABELS[tracker_mode]}")
-        write_report(f"追蹤設定: {tracker_config}")
-        write_report(f"遮蔽追蹤保活: {tracker_occlusion_grace_seconds(tracker_mode)} 秒")
-        write_report(f"信心門檻: {settings.get('confThresh', 0.40)}")
-        write_report(f"啟用類別: {format_enabled_classes(settings.get('classes', {}))}")
-        write_report(f"蒐證模式: {settings.get('captureMode', '')}")
-        write_report(f"極速背景處理: {'開啟' if settings.get('fastMode', True) else '關閉'}")
-        write_report(f"靜止物件過濾: {'開啟' if settings.get('filterStationary', True) else '關閉'}")
-        write_report(f"空景跳躍間隔: {settings.get('skipSec', 0.20)} 秒")
-        write_report(f"批次集中資料夾: {'開啟' if single_folder else '關閉'}")
-        write_report("=========================================\n")
+            summary["outputDir"] = batch_output_dir
 
         manager = multiprocessing.Manager()
         ui_queue = manager.Queue()
         shared_state = manager.dict({
             'stop_requested': False,
+            'force_stop_requested': False,
             'skip_video_path': None,
             'player_state': player_state,
             'live_settings': global_live_settings,
             'roi_points': roi_points,
-            'scale_info': scale_info
+            'scale_info': scale_info,
+            'writer_stats': {},
         })
-        
+
         sync_running = True
         def state_sync_thread():
             while sync_running:
                 try:
                     shared_state['stop_requested'] = stop_requested
+                    shared_state['force_stop_requested'] = force_stop_requested
                     shared_state['skip_video_path'] = skip_video_path
                     shared_state['player_state'] = player_state
                     shared_state['live_settings'] = global_live_settings
@@ -963,9 +1182,9 @@ def batch_processing_worker(settings):
                 except Exception:
                     break
                 time.sleep(0.05)
-                
+
         threading.Thread(target=state_sync_thread, daemon=True).start()
-        
+
         def ui_listener_thread():
             while sync_running:
                 try:
@@ -979,40 +1198,22 @@ def batch_processing_worker(settings):
                     pass
                 except Exception:
                     pass
-                    
-        threading.Thread(target=ui_listener_thread, daemon=True).start()
 
+        threading.Thread(target=ui_listener_thread, daemon=True).start()
         current_idx = 0
         while current_idx < total_v:
             if stop_requested:
                 break
-            
             video_path = q[current_idx]
-            # Reset skip path for next video
             global skip_video_path
             skip_video_path = None
             shared_state['skip_video_path'] = None
-            
+            shared_state['writer_stats'] = {}
             v_name = os.path.basename(video_path)
-            
             eel.updateStatus(f"狀態: 正在分析 ({current_idx + 1}/{total_v}) {v_name}", "ok")
             eel.appendLog(f"開始載入影片: {v_name}", "info")
-            write_report(f"▶ 開始分析影片 ({current_idx + 1}/{total_v}): {v_name}")
-            try:
-                evidence = build_evidence_metadata(video_path)
-                write_report(f"  原始路徑: {evidence['path']}")
-                write_report(f"  檔案大小: {evidence['size']} bytes")
-                write_report(f"  檔案修改時間: {evidence['modified']}")
-                write_report(f"  SHA-256: {evidence['sha256']}")
-            except Exception as hash_error:
-                write_report(f"  ❌ 無法建立原始證物雜湊: {hash_error}")
-                eel.appendLog(f"{v_name} 無法建立 SHA-256，已停止以避免產生不可追溯證物", "danger")
-                write_report(f"⛔ 分析狀態: 雜湊失敗，未進入分析\n")
-                current_idx += 1
-                continue
-            
             p = multiprocessing.Process(
-                target=process_wrapper, 
+                target=process_wrapper,
                 args=(
                     video_path,
                     v_name,
@@ -1022,36 +1223,45 @@ def batch_processing_worker(settings):
                     shared_state,
                     model_name,
                     engine_mode,
-                    current_report_path,
                 )
             )
             p.start()
-            
-            # Watchdog loop: wait for process to finish or crash, while staying responsive to stop requests
+
             while p.is_alive():
+                if force_stop_requested:
+                    summary["forced"] = True
+                    try:
+                        shared_state['force_stop_requested'] = True
+                        shared_state['stop_requested'] = True
+                    except Exception:
+                        pass
+                    p.terminate()
+                    p.join(timeout=5)
+                    break
                 if stop_requested:
                     try:
                         shared_state['stop_requested'] = True
                     except Exception:
                         pass
-                p.join(timeout=0.5)
-            
+                p.join(timeout=0.25)
+
+            writer_stats = dict(shared_state.get('writer_stats', {}))
+            if force_stop_requested:
+                pending = max(0, int(writer_stats.get("events", 0)) - int(writer_stats.get("written", 0)) - int(writer_stats.get("errors", 0)))
+                writer_stats["discarded"] = int(writer_stats.get("discarded", 0)) + pending
+            for key in ("events", "written", "discarded", "errors"):
+                summary[key] += int(writer_stats.get(key, 0))
+
             requested_path = None
             try:
                 requested_path = shared_state.get('skip_video_path', None)
             except Exception:
                 pass
-            if p.exitcode != 0:
-                write_report(f"❌ 分析狀態: 致命錯誤 (離開代碼: {p.exitcode}，看門狗已介入)\n")
-            elif stop_requested:
-                write_report("⏹️ 分析狀態: 使用者中止\n")
-            elif requested_path is not None:
-                write_report(f"⏭️ 分析狀態: 使用者要求跳轉至 {os.path.basename(requested_path)}\n")
-            else:
-                write_report(f"✅ 分析狀態: 完成 {v_name}\n")
+            if p.exitcode != 0 and not force_stop_requested:
+                summary["errors"] += 1
+                eel.appendLog(f"{v_name} 分析程序異常結束（代碼 {p.exitcode}）", "error")
             gc.collect()
-            
-            # Check if user requested to skip to a specific video during this process
+
             skip_path = requested_path
             if skip_path is not None:
                 try:
@@ -1061,26 +1271,31 @@ def batch_processing_worker(settings):
             else:
                 current_idx += 1
 
-        if stop_requested:
-            eel.updateStatus("狀態: 已由使用者手動中止", "danger")
-            eel.appendLog("任務被中斷", "warn")
-            write_report("=== 批次任務狀態: 使用者中止 ===")
+        if force_stop_requested:
+            eel.updateStatus("狀態: 已強制停止，未寫入截圖已捨棄", "danger")
+            eel.appendLog(f"強制停止完成，捨棄 {summary['discarded']} 張未寫入截圖", "warn")
+        elif stop_requested:
+            eel.updateStatus("狀態: 已停止，截圖佇列已完成寫入", "warn")
+            eel.appendLog("任務已安全停止", "warn")
         else:
             eel.updateProgress(100, "")
             eel.updateStatus("狀態: 全部完成！", "ok")
             eel.appendLog("所有佇列影片處理完成", "success")
-            write_report("=== 批次任務狀態: 全部完成 ===")
-
     except Exception as e:
         err_msg = traceback.format_exc()
+        summary["errors"] += 1
         eel.updateStatus("系統崩潰", "danger")
         eel.appendLog(f"系統崩潰: {str(e)}", "error")
-        write_report(f"=== 批次任務狀態: 系統崩潰 ({str(e)}) ===")
         print(err_msg)
     finally:
         sync_running = False
         is_processing = False
-        eel.processingFinished()
+        eel.processingFinished(summary)
+        if manager is not None:
+            try:
+                manager.shutdown()
+            except Exception:
+                pass
 
 def parse_start_time(filename):
     # Channel export: CH07-20260326-173728-184505 (YYYYMMDD-Start-End)
@@ -1157,8 +1372,10 @@ def format_timecode(milliseconds, start_time=None):
     mins = mins % 60
     return f"{hrs:02d}:{mins:02d}:{secs:02d}.{ms // 100:01d}"
 
-def process_single_video(video_path, video_name, settings, batch_output_dir=None):
+def process_single_video(video_path, video_name, settings, batch_output_dir=None, shared_state=None):
     global stop_requested, real_roi_poly, skip_video_path
+    capture_writer = None
+    writer_finished = False
     
     clean_v_name = os.path.splitext(video_name)[0]
     clean_v_name = "".join([c for c in clean_v_name if c.isalnum() or c in (".", "_", "-", "[", "]")]).rstrip()
@@ -1166,7 +1383,17 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         output_dir = batch_output_dir
     else:
         output_dir = os.path.join(CONFIG.CAPTURES_DIR, clean_v_name)
-        os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(output_dir, exist_ok=True)
+
+    def update_writer_status(stats):
+        if shared_state is not None:
+            try:
+                shared_state['writer_stats'] = stats
+            except Exception:
+                pass
+        eel.updateWriterStatus(stats)()
+
+    capture_writer = CaptureWriter(status_callback=update_writer_status)
     real_roi_poly = get_real_roi_polygon()
     start_time_dt = parse_start_time(video_name)
     tracker_mode, tracker_config = resolve_tracker_config(settings)
@@ -1208,11 +1435,12 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         scale_info = (scale, (canvas_w - new_w) // 2, (canvas_h - new_h) // 2, img_w, img_h)
 
         conf_thresh, class_vars = settings['confThresh'], settings['classes']
-        capture_mode, fast_mode = settings.get('captureMode', ''), settings.get('fastMode', True)
-        filter_stationary = settings.get('filterStationary', True)
+        headless = settings.get('executionMode', 'preview') == 'headless'
+        burn_annotations = bool(settings.get('burnAnnotations', False))
         skip_sec = float(settings.get('skipSec', 0.20))
         inference_size = int(settings.get('inferenceSize', 960))
         rider_assist = bool(settings.get('riderAssist', True))
+        motion_guide = MotionGuideDetector()
         static_skip_step = max(1, int(fps * skip_sec))
         
         track_states, id_alias_map = {}, {}
@@ -1222,7 +1450,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
         is_raw_stream = (stream.duration is None)
         stream.codec_context.skip_frame = 'DEFAULT'
         frame_iter = container.decode(stream)
-        current_av_frame = None
+        current_frame_cache = None
         raw_skip_counter = 0       # 用來控制 Raw 流靜態模式的 YOLO 執行頻率
         last_progress_update = 0   # 上次更新進度條的時間
 
@@ -1253,11 +1481,9 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     with decoder_health_lock:
                         decoder_health["slow_warned"] = True
                     dlog(f"[WATCHDOG] 解碼耗時偏長但尚未熔斷: {elapsed:.1f}s")
-                    write_report(f"⚠️ 解碼器回應偏慢: {video_name}，已等待 {elapsed:.1f} 秒")
                 if should_trigger_decoder_deadlock(phase, elapsed):
                     deadlock_detected = True
                     dlog(f"[WATCHDOG] 🚨 解碼階段 {elapsed:.1f}s 無進展，觸發熔斷")
-                    write_report(f"🚨 影片讀取失敗 (解碼階段 {elapsed:.1f} 秒無進展): {video_name}")
                     eel.appendLog(f"🚨 {clean_v_name} 解碼超過 {CONFIG.DECODER_DEADLOCK_SEC:.0f} 秒無回應，看門狗已熔斷", "danger")
                     break
 
@@ -1373,6 +1599,9 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
             return None
 
         last_ui_update, last_pushed_idx = time.time(), -1
+        last_seek_revision = -1
+        last_step_revision = -1
+        last_capture_revision = -1
         
         while True:
             if stop_requested or skip_video_path is not None:
@@ -1381,12 +1610,18 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                 raise RuntimeError("Watchdog triggered deadlock interruption")
             
             with player_lock:
-                req_seek = player_state['seek_req']
-                req_step = player_state['step_req']
+                seek_revision = int(player_state.get('seek_revision', 0))
+                step_revision = int(player_state.get('step_revision', 0))
+                capture_revision = int(player_state.get('manual_capture_revision', 0))
+                req_seek = player_state['seek_req'] if seek_revision != last_seek_revision else None
+                req_step = player_state['step_req'] if step_revision != last_step_revision else 0
                 is_play = player_state['playing']
                 is_rev = player_state['reverse']
                 p_speed = player_state['speed']
-                req_capture = player_state['manual_capture_req']
+                req_capture = player_state['manual_capture_req'] if capture_revision != last_capture_revision else False
+                last_seek_revision = seek_revision
+                last_step_revision = step_revision
+                last_capture_revision = capture_revision
                 player_state['seek_req'] = None
                 player_state['step_req'] = 0
                 player_state['manual_capture_req'] = False
@@ -1406,12 +1641,16 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     else:
                         target_idx = target_idx + int(1 * p_speed)
 
-                if target_idx != decoded_frame_idx or current_av_frame is None:
+                if target_idx != decoded_frame_idx or current_frame_cache is None:
                     frame = get_frame(target_idx)
                     if frame is None and is_play:
                         break
+                    if frame is not None:
+                        decoded_frame_idx = last_received_idx
+                        target_idx = decoded_frame_idx
+                        current_frame_cache = frame
                 else:
-                    frame = current_av_frame.to_ndarray(format='bgr24') if current_av_frame else None
+                    frame = current_frame_cache
 
                 target_frame_idx = target_idx
 
@@ -1426,8 +1665,12 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                         cv2.polylines(annotated, [real_roi_poly], True, (0, 255, 128), 2)
                     
                     if req_capture:
-                        save_legal_screenshot(annotated, output_dir, time_code_str, ["Manual Capture"], clean_v_name)
-                        eel.appendLog(f"[{time_code_str}] 📸 手動快門擷取成功", "success")
+                        manual_target = {"tid": 0, "class_name": "Manual", "cls_id": -1, "conf": 1.0, "xyxy": (0, 0, 0, 0)}
+                        if capture_writer.enqueue(
+                            frame, output_dir, time_code_str, clean_v_name,
+                            manual_target, [], False,
+                        ):
+                            eel.appendLog(f"[{time_code_str}] 📸 手動全景快門已排入寫入佇列", "success")
 
                     # Draw OSD Timecode
                     frame_h, frame_w = annotated.shape[:2]
@@ -1452,20 +1695,14 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
             else:
                 live_values = resolve_live_processing_settings(global_live_settings, {
                     'confThresh': conf_thresh,
-                    'fastMode': fast_mode,
                     'skipSec': skip_sec,
                     'classes': class_vars,
-                    'captureMode': capture_mode,
-                    'filterStationary': filter_stationary,
                     'inferenceSize': inference_size,
                     'riderAssist': rider_assist,
                 })
                 conf_thresh = live_values['confThresh']
-                fast_mode = live_values['fastMode']
                 skip_sec = live_values['skipSec']
                 class_vars = live_values['classes']
-                capture_mode = live_values['captureMode']
-                filter_stationary = live_values['filterStationary']
                 inference_size = int(live_values.get('inferenceSize', 960))
                 rider_assist = bool(live_values.get('riderAssist', True))
                 static_skip_step = max(1, int(fps * skip_sec))
@@ -1483,12 +1720,12 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             # 這幀跳過 YOLO，只更新進度條並進到下一幀
                             target_frame_idx += 1
                             _now = time.time()
-                            if _now - last_ui_update > 0.5:
-                                push_frame_to_ui(frame, [], None, time_code_str)
+                            ms = (target_frame_idx / fps) * 1000
+                            t_str = format_timecode(ms, start_time_dt)
+                            if not headless and _now - last_ui_update > 0.5:
+                                push_frame_to_ui(frame, [], real_roi_poly, t_str)
                                 last_ui_update = _now
                             if _now - last_progress_update > 0.2:
-                                ms = (target_frame_idx / fps) * 1000
-                                t_str = format_timecode(ms, start_time_dt)
                                 eel.updateProgress(min(100, (target_frame_idx / total_frames) * 100), t_str)
                                 last_progress_update = _now
                             continue
@@ -1518,7 +1755,11 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     last_progress_update = now
 
                 # ---------------- YOLO Detection (高解析推論 + 視角/小目標特化) ----------------
-                track_kwargs = {'conf': conf_thresh, 'verbose': False}
+                motion_guided = motion_guide.observe(frame, real_roi_poly)
+                effective_conf = conf_thresh
+                if motion_guided and conf_thresh >= CONFIG.MOTION_GUIDE_BASE_CONF:
+                    effective_conf = CONFIG.MOTION_GUIDE_COMPENSATED_CONF
+                track_kwargs = {'conf': effective_conf, 'verbose': False}
                 if inference_size and inference_size != 640:
                     track_kwargs['imgsz'] = inference_size
 
@@ -1540,7 +1781,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                     moto_or_bike_enabled = class_vars.get("3", True) or class_vars.get("1", True)
                     for box in boxes:
                         conf = float(box.conf[0])
-                        if conf < conf_thresh:
+                        if conf < effective_conf:
                             continue
                         cls_id = int(box.cls[0])
 
@@ -1560,7 +1801,8 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                         if not class_vars.get(str(cls_id), True) and not is_likely_rider:
                             continue
 
-                        raw_tid = int(box.id[0]) if box.id is not None else 0
+                        track_confirmed = box.id is not None
+                        raw_tid = int(box.id[0]) if track_confirmed else 0
                         tid = id_alias_map.get(raw_tid, raw_tid) if raw_tid != 0 else 0
                         xyxy = box.xyxy[0].cpu().numpy()
                         x1, y1, x2, y2 = map(int, xyxy)
@@ -1584,7 +1826,10 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
 
                         if inside_roi:
                             target_cls = 3 if (is_likely_rider and class_vars.get("3", True)) else cls_id
-                            valid_targets.append({'tid': tid, 'raw_tid': raw_tid, 'conf': conf, 'cls_id': target_cls, 'xyxy': (x1, y1, x2, y2)})
+                            valid_targets.append({
+                                'tid': tid, 'raw_tid': raw_tid, 'track_confirmed': track_confirmed,
+                                'conf': conf, 'cls_id': target_cls, 'xyxy': (x1, y1, x2, y2),
+                            })
 
                 # ---------------- Filter Overlapping Targets (人車合一與精準去重) ----------------
                 drop_indices = set()
@@ -1661,7 +1906,10 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                         
                         is_dynamic_mode = True
                         
-                        # 重置 YOLO 追蹤器
+                        # 重置 YOLO 追蹤器時會從頭分配 Track ID；舊世代狀態不可沿用，
+                        # 否則新車可能取得舊 ID 而被誤判為已截圖。
+                        track_states.clear()
+                        id_alias_map.clear()
                         if hasattr(model, 'predictor'):
                             model.predictor = None
                             
@@ -1679,8 +1927,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                         continue
                     else:
                         _run_grace_period_gc(
-                            milliseconds, track_states, capture_mode, output_dir, clean_v_name,
-                            filter_stationary, reidentify_grace_msec,
+                            milliseconds, track_states, reidentify_grace_msec,
                         )
                         if is_raw_stream:
                             target_frame_idx += 1  # Raw 流靜態模式：每幀前進 1
@@ -1688,7 +1935,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             target_frame_idx += static_skip_step
                         # 靜態空景模式：每 0.5 秒仍推送一幀到 UI，確保預覽畫面不凍結
                         _now = time.time()
-                        if _now - last_ui_update > 0.5:
+                        if not headless and _now - last_ui_update > 0.5:
                             # 畫上 OSD 否則實時畫面沒時間碼
                             frame_h, frame_w = annotated_frame.shape[:2]
                             osd_text = f"AG-MONITOR | {time_code_str}"
@@ -1714,13 +1961,12 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                         else:
                             target_frame_idx += static_skip_step
                         _run_grace_period_gc(
-                            milliseconds, track_states, capture_mode, output_dir, clean_v_name,
-                            filter_stationary, reidentify_grace_msec,
+                            milliseconds, track_states, reidentify_grace_msec,
                         )
                         
                         # 退出動態模式：推送最後一幀讓使用者看到
                         _now = time.time()
-                        if _now - last_ui_update > 0.5:
+                        if not headless and _now - last_ui_update > 0.5:
                             frame_h, frame_w = annotated_frame.shape[:2]
                             osd_text = f"AG-MONITOR | {time_code_str}"
                             (tw, th), _ = cv2.getTextSize(osd_text, cv2.FONT_HERSHEY_SIMPLEX, 0.7, 2)
@@ -1732,7 +1978,10 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
 
 
                 # ---------------- Track States Management ----------------
+                new_scene_targets = []
                 for target in valid_targets:
+                    if not target.get('track_confirmed', False):
+                        continue
                     raw_tid = target['raw_tid']
                     tid = target['tid']
                     
@@ -1772,18 +2021,7 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             track_states[tid] = {
                                 'class_name': cls_name,
                                 'best_conf': conf,
-                                'start_frame': annotated_frame.copy(),
-                                'start_timecode': time_code_str,
-                                'start_target_info': target.copy(),
-                                'best_frame': annotated_frame.copy(),
-                                'best_timecode': time_code_str,
-                                'best_summary': [f"{summary_str}({conf:.2f} Peak)"],
-                                'best_target_info': target.copy(),
-                                'last_frame': annotated_frame.copy(),
-                                'last_timecode': time_code_str,
-                                'last_target_info': target.copy(),
                                 'last_seen_msec': milliseconds,
-                                'last_continuous_capture_msec': milliseconds,
                                 'last_centroid': (cx, cy),
                                 'start_box_size': (w, h),
                                 'last_box_size': (w, h),
@@ -1794,45 +2032,38 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                             }
                             
                     if tid in track_states:
+                        target['tid'] = tid
                         state = track_states[tid]
                         state['last_seen_msec'] = milliseconds
-                        state['last_frame'] = annotated_frame.copy()
-                        state['last_timecode'] = time_code_str
-                        state['last_target_info'] = target.copy()
                         state['last_centroid'] = (cx, cy)
                         state['last_box_size'] = (w, h)
                         
                         if conf > state['best_conf']:
                             state['best_conf'] = conf
-                            state['best_frame'] = annotated_frame.copy()
-                            state['best_timecode'] = time_code_str
-                            state['best_summary'] = [f"{summary_str}({conf:.2f} Peak)"]
-                            state['best_target_info'] = target.copy()
                             
                         if not state['is_moving'] and record_motion_observation(state, (cx, cy), (w, h)):
                             dlog(f"[DEBUG-MOVE] ID:{tid} {state['class_name']} 已確認移動")
-                            eel.appendLog(f"[{time_code_str}] ID:{tid} {state['class_name']} 已確認移動，開始蒐證", "info")
+                            if not headless:
+                                eel.appendLog(f"[{time_code_str}] ID:{tid} {state['class_name']} 已確認移動", "info")
                         state['prev_centroid'] = (cx, cy)
                                 
                         if state['is_moving'] and not state['entry_captured']:
                             state['entry_captured'] = True
-                            dlog(f"[DEBUG-CAPTURE] 準備截圖! mode={capture_mode} output_dir={output_dir}")
-                            if capture_mode in ["雙格蒐證模式 (起點+最清晰)", "事件起訖模式"]:
-                                save_legal_screenshot(state['start_frame'], output_dir, state['start_timecode'], [f"ID:{tid} {state['class_name']}(Entry)"], clean_v_name, state.get('start_target_info'))
-                                eel.appendLog(f"[{state['start_timecode']}] 擷取 ID:{tid} {state['class_name']}(Entry)", "success")
-                            elif capture_mode == "持續追蹤模式 (預設)":
-                                save_legal_screenshot(state['start_frame'], output_dir, state['start_timecode'], [f"ID:{tid} {state['class_name']}(Track-Entry)"], clean_v_name, state.get('start_target_info'))
-                                eel.appendLog(f"[{state['start_timecode']}] 擷取 ID:{tid} {state['class_name']}(Track-Entry)", "success")
-                    
-                    if capture_mode == "持續追蹤模式 (預設)":
-                        state = track_states[tid]
-                        if state['is_moving']:
-                            if (milliseconds - state['last_continuous_capture_msec']) >= 3000:
-                                state['last_continuous_capture_msec'] = milliseconds
-                                save_legal_screenshot(annotated_frame, output_dir, time_code_str, [f"{summary_str}(Track)"], clean_v_name, target)
-                                eel.appendLog(f"[{time_code_str}] 擷取 {summary_str}(Track)", "success")
+                            new_scene_targets.append(target.copy())
 
-                if engine_mode == 'auto' and is_dynamic_mode:
+                if new_scene_targets:
+                    primary_target = new_scene_targets[0]
+                    queued = capture_writer.enqueue(
+                        frame, output_dir, time_code_str, clean_v_name,
+                        primary_target, valid_targets, burn_annotations,
+                    )
+                    if queued and not headless:
+                        eel.appendLog(
+                            f"[{time_code_str}] 全景事件已排入：ID:{primary_target['tid']} {_target_label(primary_target)}",
+                            "success",
+                        )
+
+                if engine_mode == 'auto' and is_dynamic_mode and not headless:
                     current_targets_str = ", ".join([f"ID:{t['tid']} {CONFIG.TARGET_CLASSES[t['cls_id']]}" for t in valid_targets])
                     if current_targets_str:
                         eel.updateStatus(f"狀態: 正在分析 (發現目標: {current_targets_str})", "ok")
@@ -1846,31 +2077,40 @@ def process_single_video(video_path, video_name, settings, batch_output_dir=None
                 cv2.rectangle(annotated_frame, (5, frame_h - th - 15), (5 + tw + 10, frame_h - 5), (0, 0, 0), -1)
                 cv2.putText(annotated_frame, osd_text, (10, frame_h - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 255), 2)
 
-                if not fast_mode:
+                if not headless:
                     push_frame_to_ui(frame, valid_targets, real_roi_poly, time_code_str)
                     
-                # 每幀都執行 GC，確保已移動物件在消失後立即儲存截圖
+                # 每幀釋放已離場的追蹤狀態，讓同一 ID 日後重新進場時可再次建立事件。
                 _run_grace_period_gc(
-                    milliseconds, track_states, capture_mode, output_dir, clean_v_name,
-                    filter_stationary, reidentify_grace_msec,
+                    milliseconds, track_states, reidentify_grace_msec,
                 )
 
                 target_frame_idx += 1 
 
         if engine_mode == 'auto':
-            _flush_all_track_states(track_states, capture_mode, output_dir, clean_v_name, filter_stationary)
+            track_states.clear()
+        writer_stats = capture_writer.finish(flush=not force_stop_requested)
+        writer_finished = True
+        if shared_state is not None:
+            shared_state['writer_stats'] = writer_stats
         decode_thread_running = False
         set_decoder_phase("stopped", made_progress=True)
         container.close()
 
     except Exception as e:
         err_msg = traceback.format_exc()
-        write_report(f"  ❌ 影片解碼異常 ({video_name}): {str(e)}")
         eel.appendLog(f"[{video_name}] 解碼毀損診斷: {str(e)}", "error")
         eel.appendLog("處置建議: 可能是編碼異常或檔案殘缺，請重新提取原始檔案。", "warn")
         print(f"Exception for {video_name}:\n{err_msg}")
         raise
     finally:
+        if capture_writer is not None and not writer_finished:
+            try:
+                writer_stats = capture_writer.finish(flush=not force_stop_requested)
+                if shared_state is not None:
+                    shared_state['writer_stats'] = writer_stats
+            except Exception as writer_error:
+                dlog(f"[CAPTURE-WRITER] 收尾失敗: {writer_error}")
         if 'decode_thread_running' in locals():
             decode_thread_running = False
         if container:
@@ -1920,467 +2160,14 @@ def push_frame_to_ui(frame, valid_targets=[], roi_poly=None, time_code_str=""):
 
     eel.setPreviewImage(b64_str, info_obj, json_boxes, roi_pts, time_code_str)()
 
-def _run_grace_period_gc(
-    curr_msec, track_states, capture_mode, output_dir, prefix_name,
-    filter_stationary=True, reidentify_grace_msec=1500,
-):
-    expired_ids = []
-    for tid, state in track_states.items():
-        if (curr_msec - state['last_seen_msec']) > reidentify_grace_msec:
-            expired_ids.append(tid)
+def _run_grace_period_gc(curr_msec, track_states, reidentify_grace_msec=1500):
+    """釋放已離場目標；場景截圖在新移動目標確認時已完成排程。"""
+    expired_ids = [
+        tid for tid, state in track_states.items()
+        if (curr_msec - state['last_seen_msec']) > reidentify_grace_msec
+    ]
     for tid in expired_ids:
-        state = track_states[tid]
-        if filter_stationary and not state['is_moving']:
-            pass
-        else:
-            if capture_mode in ["雙格蒐證模式 (起點+最清晰)", "單次最清晰模式 (推薦)"]:
-                if state['best_frame'] is not None:
-                    capture_path = save_legal_screenshot(state['best_frame'], output_dir, state['best_timecode'], state['best_summary'], prefix_name, state.get('best_target_info'))
-                    if capture_path:
-                        eel.appendLog(f"[{state['best_timecode']}] 擷取 {state['best_summary'][0]}", "success")
-                    else:
-                        eel.appendLog(f"[{state['best_timecode']}] 寫入 {state['best_summary'][0]} 失敗", "error")
-            elif capture_mode == "事件起訖模式":
-                if state['last_frame'] is not None:
-                    capture_path = save_legal_screenshot(state['last_frame'], output_dir, state['last_timecode'], [f"ID:{tid} {state['class_name']}(Exit)"], prefix_name, state.get('last_target_info'))
-                    if capture_path:
-                        eel.appendLog(f"[{state['last_timecode']}] 擷取 ID:{tid} {state['class_name']}(Exit)", "success")
-                    else:
-                        eel.appendLog(f"[{state['last_timecode']}] 寫入 ID:{tid} {state['class_name']}(Exit) 失敗", "error")
         del track_states[tid]
-
-def _flush_all_track_states(track_states, capture_mode, output_dir, prefix_name, filter_stationary=True):
-    for tid, state in track_states.items():
-        if filter_stationary and not state['is_moving']:
-            continue
-        if capture_mode in ["雙格蒐證模式 (起點+最清晰)", "單次最清晰模式 (推薦)"]:
-            if state['best_frame'] is not None:
-                capture_path = save_legal_screenshot(state['best_frame'], output_dir, state['best_timecode'], state['best_summary'], prefix_name, state.get('best_target_info'))
-                if capture_path:
-                    eel.appendLog(f"[{state['best_timecode']}] 擷取 {state['best_summary'][0]}", "success")
-                else:
-                    eel.appendLog(f"[{state['best_timecode']}] 寫入 {state['best_summary'][0]} 失敗", "error")
-        elif capture_mode == "事件起訖模式":
-            if state['last_frame'] is not None:
-                capture_path = save_legal_screenshot(state['last_frame'], output_dir, state['last_timecode'], [f"ID:{tid} {state['class_name']}(Exit)"], prefix_name, state.get('last_target_info'))
-                if capture_path:
-                    eel.appendLog(f"[{state['last_timecode']}] 擷取 ID:{tid} {state['class_name']}(Exit)", "success")
-                else:
-                    eel.appendLog(f"[{state['last_timecode']}] 寫入 ID:{tid} {state['class_name']}(Exit) 失敗", "error")
-    track_states.clear()
-
-CAPTURES_DIR = CONFIG.CAPTURES_DIR
-CAPTURE_MANIFEST_FILENAME = "鑑識截圖清冊.jsonl"
-
-
-def _append_capture_manifest(output_dir, capture_path, time_code, objects_list, source_prefix):
-    """追加一筆可機讀的截圖鑑識紀錄，並立即刷入磁碟。"""
-    record = {
-        "version": 1,
-        "recorded_at": datetime.now().astimezone().isoformat(timespec="milliseconds"),
-        "path": os.path.abspath(capture_path),
-        "filename": os.path.basename(capture_path),
-        "size": os.path.getsize(capture_path),
-        "sha256": calculate_sha256(capture_path),
-        "time_code": time_code,
-        "targets": list(objects_list),
-        "source_prefix": source_prefix,
-        "report_path": os.path.abspath(current_report_path) if current_report_path else None,
-    }
-    manifest_dir = os.path.dirname(current_report_path) if current_report_path else output_dir
-    manifest_path = os.path.join(manifest_dir, CAPTURE_MANIFEST_FILENAME)
-    with open(manifest_path, "a", encoding="utf-8", newline="\n") as manifest_file:
-        manifest_file.write(json.dumps(record, ensure_ascii=False) + "\n")
-        manifest_file.flush()
-        os.fsync(manifest_file.fileno())
-    return record
-
-
-def save_legal_screenshot(frame, output_dir, time_code, objects_list, prefix_name="evidence", target_info=None):
-    dlog(f"[DEBUG-SAVE] save_legal_screenshot called: output_dir={output_dir}, time_code={time_code}")
-    try:
-        os.makedirs(output_dir, exist_ok=True)
-    except Exception as e:
-        dlog(f"[DEBUG-SAVE] makedirs failed: {e}")
-        return
-
-    MIN_WIDTH = 1280
-    if frame.shape[1] < MIN_WIDTH:
-        scale = MIN_WIDTH / frame.shape[1]
-        new_w = int(frame.shape[1] * scale)
-        new_h = int(frame.shape[0] * scale)
-        frame = cv2.resize(frame, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-    else:
-        scale = 1.0
-        
-    if target_info is not None:
-        x1, y1, x2, y2 = target_info['xyxy']
-        x1, y1, x2, y2 = int(x1 * scale), int(y1 * scale), int(x2 * scale), int(y2 * scale)
-        cls_id = target_info['cls_id']
-        tid = target_info['tid']
-        conf = target_info['conf']
-        
-        frame_w = frame.shape[1]
-        if frame_w < 1280:
-            thick, font_thick, font_scale = 1, 1, 0.4
-        elif frame_w < 2000:
-            thick, font_thick, font_scale = 2, 1, 0.6
-        else:
-            thick, font_thick, font_scale = 3, 2, 0.8
-            
-        cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), thick)
-        cv2.putText(frame, f"ID:{tid} {CONFIG.TARGET_CLASSES[cls_id]} {conf:.2f}",
-            (x1, max(15, y1 - 5)), cv2.FONT_HERSHEY_SIMPLEX, font_scale, (0, 0, 255), font_thick)
-
-    frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-    pil_img = Image.fromarray(frame_rgb)
-    draw = ImageDraw.Draw(pil_img)
-
-    try:
-        font = ImageFont.truetype("msjh.ttc", 16)
-        small_font = ImageFont.truetype("msjh.ttc", 12)
-    except Exception:
-        try:
-            font = ImageFont.truetype("arial.ttf", 16)
-            small_font = ImageFont.truetype("arial.ttf", 12)
-        except Exception:
-            font = ImageFont.load_default()
-            small_font = ImageFont.load_default()
-
-    w, h = pil_img.size
-    watermark_text = f"AG-MONITOR | Timecode: {time_code}"
-    detail_text = f"Target: {', '.join(objects_list)}"
-
-    try:
-        text_bbox = draw.textbbox((0, 0), watermark_text, font=font)
-        tw = text_bbox[2] - text_bbox[0]
-        det_bbox = draw.textbbox((0, 0), detail_text, font=small_font)
-        dw = det_bbox[2] - det_bbox[0]
-    except AttributeError:
-        tw, _ = draw.textsize(watermark_text, font=font)
-        dw, _ = draw.textsize(detail_text, font=small_font)
-    
-    box_w = max(tw, dw) + 30
-    box_h = 45
-    
-    bx1 = 15
-    by1 = h - box_h - 15
-    bx2 = bx1 + box_w
-    by2 = by1 + box_h
-    
-    overlay = Image.new('RGBA', pil_img.size, (255, 255, 255, 0))
-    overlay_draw = ImageDraw.Draw(overlay)
-    
-    # 120 is roughly 47% opacity for the background
-    overlay_draw.rectangle([(bx1, by1), (bx2, by2)], fill=(0, 0, 0, 120))
-    overlay_draw.text((bx1 + 15, by1 + 5), watermark_text, fill=(255, 255, 0, 255), font=font)
-    overlay_draw.text((bx1 + 15, by1 + 25), detail_text, fill=(255, 255, 255, 255), font=small_font)
-
-    pil_img = pil_img.convert("RGBA")
-    pil_img = Image.alpha_composite(pil_img, overlay)
-    pil_img = pil_img.convert("RGB")
-    if " " in time_code:
-        parts = time_code.split(".")
-        main_time = parts[0]
-        safe_time_str = main_time.replace("/", "").replace(":", "").replace(" ", "_")
-        if len(parts) > 1:
-            safe_time_str += f"_{parts[1]}"
-    else:
-        safe_time_str = time_code.replace(":", "").replace(".", "_")
-        
-    filename = f"{prefix_name}_{safe_time_str}.jpg"
-    final_path = os.path.join(output_dir, filename)
-    dlog(f"[DEBUG-SAVE] Saving to: {final_path}")
-
-    final_bgr = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-    try:
-        is_success, buffer = cv2.imencode('.jpg', final_bgr)
-        if is_success:
-            stem, extension = os.path.splitext(final_path)
-            collision_index = 0
-            while True:
-                actual_path = final_path if collision_index == 0 else f"{stem}_{collision_index}{extension}"
-                try:
-                    with open(actual_path, 'xb') as f:
-                        f.write(buffer.tobytes() if hasattr(buffer, "tobytes") else buffer)
-                    break
-                except FileExistsError:
-                    collision_index += 1
-            manifest_record = _append_capture_manifest(output_dir, actual_path, time_code, objects_list, prefix_name)
-            dlog(f"[DEBUG-SAVE] ✅ File written OK: {actual_path}")
-            write_report(
-                f"  📸 [截圖] 時間: {time_code} | 目標: {', '.join(objects_list)} | "
-                f"檔名: {os.path.basename(actual_path)} | SHA-256: {manifest_record['sha256']}"
-            )
-            return actual_path
-        else:
-            dlog(f"[DEBUG-SAVE] ❌ cv2.imencode failed for {final_path}")
-            write_report(f"  ❌ [截圖失敗] 編碼錯誤: {filename}")
-            return None
-    except Exception as e:
-        import traceback as tb
-        dlog(f"[DEBUG-SAVE] ❌ Exception: {e}")
-        dlog(tb.format_exc())
-        write_report(f"  ❌ [截圖失敗] 寫入異常: {str(e)}")
-        return None
-
-# ==========================================
-# 鑑識超解析 (Super Resolution) - NCNN 模組
-# ==========================================
-NCNN_MODEL_DIR = os.path.join(CONFIG.BASE_DIR, 'models', 'realesrgan')
-NCNN_EXE_PATH = os.path.join(NCNN_MODEL_DIR, 'realesrgan-ncnn-vulkan.exe')
-NCNN_DOWNLOAD_URL = 'https://github.com/xinntao/Real-ESRGAN/releases/download/v0.2.5.0/realesrgan-ncnn-vulkan-20220424-windows.zip'
-NCNN_ZIP_PATH = os.path.join(CONFIG.BASE_DIR, 'realesrgan-windows.zip')
-NCNN_ZIP_SHA256 = 'ABC02804E17982A3BE33675E4D471E91EA374E65B70167ABC09E31ACB412802D'
-NCNN_EXE_SHA256 = '07E49F7CBB4EDE01AE4DD4C399D3A7E5846E3D2085C3128EFF881E55CB7B1A0C'
-NCNN_REQUIRED_FILES = (
-    'realesrgan-ncnn-vulkan.exe',
-    'models/realesrgan-x4plus.bin',
-    'models/realesrgan-x4plus.param',
-    'models/realesrgan-x4plus-anime.bin',
-    'models/realesrgan-x4plus-anime.param',
-)
-
-sr_abort_flag = False
-
-
-def validate_sr_engine(engine_dir=NCNN_MODEL_DIR, expected_exe_sha256=NCNN_EXE_SHA256):
-    if not all(os.path.isfile(os.path.join(engine_dir, relative_path)) for relative_path in NCNN_REQUIRED_FILES):
-        return False
-    if expected_exe_sha256:
-        return calculate_sha256(os.path.join(engine_dir, 'realesrgan-ncnn-vulkan.exe')) == expected_exe_sha256.upper()
-    return True
-
-
-def _validate_safe_zip(zip_ref):
-    for member in zip_ref.infolist():
-        member_path = member.filename.replace('\\', '/')
-        path_parts = [part for part in member_path.split('/') if part]
-        if member_path.startswith('/') or re.match(r'^[A-Za-z]:', member_path) or '..' in path_parts:
-            raise ValueError(f"ZIP 含不安全路徑: {member.filename}")
-        unix_mode = member.external_attr >> 16
-        if (unix_mode & 0o170000) == 0o120000:
-            raise ValueError(f"ZIP 不允許符號連結: {member.filename}")
-
-
-def install_sr_engine_from_zip(
-    zip_path,
-    engine_dir=NCNN_MODEL_DIR,
-    expected_sha256=NCNN_ZIP_SHA256,
-    expected_exe_sha256=NCNN_EXE_SHA256,
-):
-    actual_sha256 = calculate_sha256(zip_path)
-    if expected_sha256 and actual_sha256 != expected_sha256.upper():
-        raise ValueError(f"Real-ESRGAN ZIP SHA-256 不符: {actual_sha256}")
-
-    parent_dir = os.path.dirname(engine_dir)
-    os.makedirs(parent_dir, exist_ok=True)
-    staging_dir = tempfile.mkdtemp(prefix='.realesrgan-staging-', dir=parent_dir)
-    try:
-        with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-            _validate_safe_zip(zip_ref)
-            zip_ref.extractall(staging_dir)
-        executable_matches = list(Path(staging_dir).rglob('realesrgan-ncnn-vulkan.exe'))
-        if len(executable_matches) != 1:
-            raise ValueError("ZIP 內找不到唯一的 Real-ESRGAN 執行檔")
-        extracted_root = str(executable_matches[0].parent)
-        if not validate_sr_engine(extracted_root, expected_exe_sha256):
-            raise ValueError("ZIP 缺少必要模型或執行檔")
-        backup_dir = engine_dir + '.previous'
-        if os.path.exists(backup_dir):
-            shutil.rmtree(backup_dir)
-        if os.path.exists(engine_dir):
-            os.replace(engine_dir, backup_dir)
-        try:
-            shutil.move(extracted_root, engine_dir)
-            if not validate_sr_engine(engine_dir, expected_exe_sha256):
-                raise RuntimeError("Real-ESRGAN 安裝後驗證失敗")
-        except Exception:
-            if os.path.exists(engine_dir):
-                shutil.rmtree(engine_dir)
-            if os.path.exists(backup_dir):
-                os.replace(backup_dir, engine_dir)
-            raise
-        if os.path.exists(backup_dir):
-            shutil.rmtree(backup_dir)
-    finally:
-        if os.path.exists(staging_dir):
-            shutil.rmtree(staging_dir, ignore_errors=True)
-    return actual_sha256
-
-def check_and_download_sr_model():
-    global sr_abort_flag
-    if not validate_sr_engine():
-        print(">>> [系統預檢] 偵測到本機缺乏 NCNN 超解析引擎 (realesrgan-ncnn-vulkan.exe)")
-        print(">>> [系統動作] 正在背景非同步下載免安裝引擎，請稍候 (約 25MB)...")
-        partial_path = NCNN_ZIP_PATH + '.part'
-        try:
-            os.makedirs(NCNN_MODEL_DIR, exist_ok=True)
-            req = urllib.request.urlopen(NCNN_DOWNLOAD_URL, timeout=30)
-            with open(partial_path, 'wb') as f:
-                while True:
-                    if sr_abort_flag:
-                        print(">>> [系統動作] 使用者已強制中止引擎下載！")
-                        req.close()
-                        return False
-                    chunk = req.read(8192)
-                    if not chunk:
-                        break
-                    f.write(chunk)
-            req.close()
-            os.replace(partial_path, NCNN_ZIP_PATH)
-            print(">>> [系統動作] 下載完成，正在驗證雜湊並安全解壓縮引擎...")
-            install_sr_engine_from_zip(NCNN_ZIP_PATH)
-            os.remove(NCNN_ZIP_PATH)
-            print(">>> [系統動作] NCNN 引擎驗證與解壓縮完成！")
-        except Exception as e:
-            print(f"❌ [數位鑑識崩潰]：NCNN 引擎下載失敗 ({e})")
-            print("💡 [系統處置建議]：請確認對外網路連線，或手動下載並解壓縮至 models/realesrgan/ 目錄。")
-            for download_path in (partial_path, NCNN_ZIP_PATH):
-                if os.path.exists(download_path):
-                    os.remove(download_path)
-            return False
-    return True
-
-@eel.expose
-def abort_ai_super_resolution():
-    global sr_abort_flag
-    sr_abort_flag = True
-    print(">>> [系統動作] 已接收前端中止信號，準備強制斬斷修復進程...")
-
-@eel.expose
-def run_ai_super_resolution(base64_str, mode='plate'):
-    global sr_abort_flag
-    sr_abort_flag = False
-
-    def _run_sr():
-        try:
-            img_data, err = safe_base64_decode(base64_str)
-            if err:
-                eel.on_super_res_finished(None, f"❌ 影像編碼錯誤: {err}")()
-                return
-            np_arr = np.frombuffer(img_data, np.uint8)
-            img = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-            
-            if img is None:
-                eel.on_super_res_finished(None, "❌ 影像解碼失敗，請確認檔案格式是否正確。")()
-                return
-
-            fallback_triggered = False
-            warning_msg = None
-
-            if not check_and_download_sr_model():
-                if sr_abort_flag:
-                    return
-                print(">>> [系統動作] NCNN 下載失敗或超時，進入備援流程！")
-                warning_msg = "⚠️ [資安警告] 網路連線超時，AI已自動平滑降級為 OpenCV 備援鑑識模態！"
-                fallback_triggered = True
-            else:
-                if sr_abort_flag:
-                    return
-                try:
-                    print(f">>> [系統動作] 發動 NCNN 物理級 GPU 鑑識重建 ({mode} 模式)...")
-                    model_name = "realesrgan-x4plus-anime" if mode == 'face' else "realesrgan-x4plus"
-                    with tempfile.TemporaryDirectory(prefix='ag-sr-') as temp_dir:
-                        temp_in = os.path.join(temp_dir, "input.png")
-                        temp_out = os.path.join(temp_dir, "output.png")
-                        if not cv2.imwrite(temp_in, img):
-                            raise RuntimeError("無法建立 NCNN 暫存輸入影像")
-
-                        cmd = [NCNN_EXE_PATH, "-i", temp_in, "-o", temp_out, "-n", model_name]
-                        creation_flags = 0x08000000 if os.name == 'nt' else 0
-                        process = subprocess.Popen(
-                            cmd,
-                            cwd=NCNN_MODEL_DIR,
-                            stdout=subprocess.DEVNULL,
-                            stderr=subprocess.DEVNULL,
-                            creationflags=creation_flags,
-                        )
-                        while process.poll() is None:
-                            if sr_abort_flag:
-                                process.terminate()
-                                try:
-                                    process.wait(timeout=3)
-                                except subprocess.TimeoutExpired:
-                                    process.kill()
-                                    process.wait(timeout=3)
-                                print(">>> [系統動作] 鑑識重建已強制中止！")
-                                return
-                            time.sleep(0.1)
-
-                        if process.returncode != 0 or not os.path.isfile(temp_out):
-                            raise RuntimeError(f"NCNN 引擎回傳錯誤代碼 {process.returncode}")
-                        result = cv2.imread(temp_out)
-                        if result is None:
-                            raise RuntimeError("NCNN 輸出影像無法解碼")
-                    
-                except Exception as ncnn_err:
-                    print(f">>> [系統警告] NCNN 超解析執行失敗 ({ncnn_err})，自動切換至 OpenCV 備援流程！")
-                    warning_msg = "⚠️ [備援提示] AI 核心引擎異常，已自動切換為高階銳化備援模態。"
-                    fallback_triggered = True
-
-            if fallback_triggered:
-                if sr_abort_flag:
-                    return
-                print(">>> [系統動作] 發動第二軌備援：傳統最高階 Lanczos 內插法與 CLAHE 直方圖均衡化...")
-                h, w = img.shape[:2]
-                scaled = cv2.resize(img, (w * 4, h * 4), interpolation=cv2.INTER_LANCZOS4)
-                
-                ycrcb = cv2.cvtColor(scaled, cv2.COLOR_BGR2YCrCb)
-                clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-                ycrcb[:,:,0] = clahe.apply(ycrcb[:,:,0])
-                result = cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
-
-            if sr_abort_flag:
-                return
-
-            if mode == 'face' and fallback_triggered:
-                print(">>> [系統動作] 備援人像五官模式後置處理：套用高階雙邊濾鏡 (Bilateral Filter)...")
-                result = cv2.bilateralFilter(result, d=15, sigmaColor=100, sigmaSpace=100)
-
-            # 通訊封包瘦身：傳送給前端預覽時使用 90 壓縮率，大幅降低 WebSocket 負載
-            _, buffer = cv2.imencode('.jpg', result, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
-            res_b64 = base64.b64encode(buffer).decode('utf-8')
-            eel.on_super_res_finished(res_b64, warning_msg)()
-            
-        except Exception as e:
-            print(f"❌ [數位鑑識崩潰]：超解析引擎運算錯誤 ({e})")
-            eel.on_super_res_finished(None, f"❌ 運算發生錯誤：{e}")()
-            
-    Thread(target=_run_sr, daemon=True).start()
-
-@eel.expose
-def save_enhanced_evidence(base64_str, mode='plate'):
-    try:
-        enhanced_dir = os.path.join(CONFIG.BASE_DIR, "enhanced_evidence")
-        os.makedirs(enhanced_dir, exist_ok=True)
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        prefix = "Enhanced_Face" if mode == 'face' else "Enhanced_Plate"
-        filename = f"{prefix}_{timestamp}.png"
-        filepath = os.path.join(enhanced_dir, filename)
-        
-        img_data, err = safe_base64_decode(base64_str)
-        if err:
-            print(f"❌ [數位鑑識崩潰]：修復檔案 Base64 解析失敗 ({err})")
-            return False
-        with open(filepath, 'wb') as f:
-            f.write(img_data)
-            
-        print(f">>> [系統動作] 鑑識修復照片已儲存至: {filepath}")
-        
-        # Windows only: open folder and select file
-        try:
-            import subprocess
-            subprocess.run(['explorer', '/select,', os.path.normpath(filepath)])
-        except Exception:
-            pass
-            
-        return True
-    except Exception as e:
-        print(f"❌ [數位鑑識崩潰]：修復檔案寫入失敗 ({e})")
-        print("💡 [系統處置建議]：請確認 enhanced_evidence 目錄未被防毒軟體或隨身碟唯讀保護。")
-        return False
 
 def start_eel_app():
     web_dir = os.path.join(CONFIG.BASE_DIR, 'web')
@@ -2392,7 +2179,7 @@ def start_eel_app():
         current_port = default_port + port_offset
         try:
             print("==================================================")
-            print("AG-MONITOR Forensic Player Engine Online!")
+            print("AG-MONITOR Smart Video Screening Engine Online!")
             print(f"http://localhost:{current_port}/index.html")
             print("==================================================")
             dlog(f"[BOOT] 嘗試於埠號 {current_port} 啟動 Eel GUI...")

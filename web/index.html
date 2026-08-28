@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AG-MONITOR 科技偵查戰術播放器</title>
+    <title>AG-MONITOR 智慧影像快篩系統</title>
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <script type="text/javascript" src="/eel.js"></script>
     <style>
@@ -112,6 +113,12 @@
             border-right: 1px solid var(--morandi-border-light);
         }
         .global-tab-brand i { color: var(--morandi-sage); font-size: 16px; }
+        .brand-symbol { width: 27px; height: 27px; flex: 0 0 auto; filter: drop-shadow(0 2px 3px rgba(39, 50, 64, 0.12)); }
+        .brand-symbol-large { width: 72px; height: 72px; }
+        .brand-lockup { display: flex; align-items: center; justify-content: center; gap: 11px; }
+        .brand-lockup-text { text-align: left; line-height: 1.15; }
+        .brand-lockup-text strong { display: block; color: var(--text-primary); font-family: "Segoe UI", "Microsoft JhengHei", sans-serif; font-size: 17px; letter-spacing: 0.5px; }
+        .brand-lockup-text small { display: block; color: var(--morandi-slate); font-size: 11px; font-weight: 700; margin-top: 4px; }
         .global-tab-btn {
             background: transparent;
             color: var(--text-secondary);
@@ -430,7 +437,7 @@
             font-weight: bold;
         }
 
-        /* 抽屜證物清單 (Queue Drawer) */
+        /* 抽屜待篩影片清單 (Queue Drawer) */
         .queue-drawer {
             position: absolute;
             top: 0;
@@ -621,11 +628,10 @@
             border-color: rgba(82, 116, 95, 0.4);
         }
         .placeholder-icon {
-            width: 52px;
-            height: 52px;
-            background: rgba(82, 116, 95, 0.15);
-            border: 1px solid rgba(82, 116, 95, 0.35);
-            border-radius: 50%;
+            width: 78px;
+            height: 78px;
+            background: transparent;
+            border: none;
             display: inline-flex;
             align-items: center;
             justify-content: center;
@@ -811,121 +817,44 @@
         .advanced-settings summary { cursor: pointer; color: var(--morandi-slate); font-size: 12px; font-weight: 700; padding: 7px 2px; }
         .analysis-summary { display: none; padding: 8px 14px; background: var(--morandi-sage-soft); border-bottom: 1px solid var(--morandi-sage-border); color: var(--text-primary); font-size: 12px; }
         .analysis-summary strong { color: var(--morandi-sage); }
-
-        /* ==========================================================================
-           照片修復工作區 (SR Workspace)
-           ========================================================================== */
-        #viewSR {
-            flex-direction: column;
-            background: var(--morandi-bg-app);
-        }
-        .sr-controls {
-            padding: 12px 20px;
-            background: #FFFFFF;
-            border-bottom: 1px solid var(--morandi-border);
-            display: flex;
-            gap: 12px;
-            justify-content: center;
-            align-items: center;
-            box-shadow: var(--shadow-sm);
-        }
-        .sr-mode-select {
-            display: flex;
-            align-items: center;
-            gap: 16px;
-            color: var(--text-secondary);
-            font-size: 13px;
-            font-weight: 600;
-            background: var(--morandi-bg-panel);
-            padding: 6px 14px;
-            border-radius: var(--radius-pill);
-            border: 1px solid var(--morandi-border);
-        }
-        .sr-mode-select label {
-            cursor: pointer;
-            display: inline-flex;
-            align-items: center;
-            gap: 5px;
-        }
-        .sr-workspace {
-            flex-grow: 1;
-            display: flex;
-            flex-direction: row;
-            gap: 16px;
-            padding: 16px;
-            overflow: hidden;
-        }
-        .sr-panel {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            background: #FFFFFF;
-            border: 1px solid var(--morandi-border);
-            border-radius: var(--radius-md);
-            padding: 14px;
-            box-shadow: var(--shadow-sm);
-        }
-        .sr-panel-title {
-            color: var(--morandi-slate);
-            font-weight: 700;
-            margin-bottom: 10px;
-            text-align: center;
-            font-size: 14px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 6px;
-        }
-        .sr-canvas-wrap {
-            flex-grow: 1;
-            border: 1px dashed var(--morandi-border);
-            background: #181C22;
-            border-radius: var(--radius-sm);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            position: relative;
-            overflow: hidden;
-            transition: all 0.2s ease;
-        }
-        .sr-canvas-wrap.drag-active {
-            border-color: var(--morandi-sage);
-            background: rgba(82, 116, 95, 0.1);
-        }
-
+        .mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 10px; }
+        .mode-option { position: relative; display: block; cursor: pointer; }
+        .mode-option input { position: absolute; opacity: 0; pointer-events: none; }
+        .mode-option-content { min-height: 64px; padding: 9px; border: 1px solid var(--morandi-border); border-radius: var(--radius-sm); background: #fff; transition: 0.15s ease; }
+        .mode-option-content strong { display: block; color: var(--text-primary); font-size: 12px; margin-bottom: 3px; }
+        .mode-option-content small { color: var(--text-secondary); font-size: 10.5px; line-height: 1.35; }
+        .mode-option input:checked + .mode-option-content { border-color: var(--morandi-sage); background: var(--morandi-sage-soft); box-shadow: 0 0 0 1px var(--morandi-sage); }
+        .writer-status { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--morandi-border-light); background: #fff; }
+        .writer-stat { text-align: center; padding: 5px; border-radius: var(--radius-sm); background: var(--morandi-bg-subtle); font-size: 10px; color: var(--text-secondary); }
+        .writer-stat strong { display: block; margin-top: 2px; color: var(--text-primary); font-size: 13px; }
         .hidden { display: none !important; }
     </style>
 </head>
 <body>
-    <!-- 全局頂部頁籤欄 -->
+    <!-- 全局頂部欄 -->
     <div class="global-tab-bar">
         <div class="global-tab-brand">
-            <i class="fas fa-shield-halved"></i>
+            <svg class="brand-symbol" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#5B728D"/><rect x="10" y="14" width="44" height="34" rx="6" fill="none" stroke="#FFF" stroke-width="4"/><path d="M14 31H50" stroke="#78A58F" stroke-width="4" stroke-linecap="round"/><circle cx="48" cy="48" r="11" fill="#52745F" stroke="#FFF" stroke-width="2"/><path d="M42.5 48L46.5 52L53.5 44" fill="none" stroke="#FFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
             <span>AG-MONITOR</span>
         </div>
-        <button id="mainTabPlayer" class="global-tab-btn active" onclick="switchMainTab('player')">
-            <i class="fas fa-video"></i> 智慧戰術播放器
-        </button>
-        <button id="mainTabSR" class="global-tab-btn" onclick="switchMainTab('sr')">
-            <i class="fas fa-wand-magic-sparkles"></i> 數位鑑識照片修復
-        </button>
+        <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: var(--morandi-slate); font-size: 13.5px; padding: 6px 14px; background: #FFFFFF; border-radius: var(--radius-pill); border: 1px solid var(--morandi-border); box-shadow: var(--shadow-sm);">
+            <i class="fas fa-filter" style="color: var(--morandi-sage);"></i> 智慧影像快篩系統
+        </div>
         <button onclick="document.getElementById('helpModal').style.display='flex'" class="global-tab-help">
             <i class="fas fa-book-bookmark"></i> 系統操作手冊
         </button>
     </div>
 
-    <!-- 主視圖：智慧戰術播放器 -->
+    <!-- 主視圖：智慧影像快篩系統 -->
     <div id="viewPlayer" class="main-view active">
         <!-- 左側設定欄 -->
         <div class="panel-left">
             <!-- 品牌標籤 -->
             <div class="logo-container">
-                <svg width="220" height="38" viewBox="0 0 250 44">
-                    <rect x="5" y="4" width="36" height="36" rx="8" fill="#52745F"/>
-                    <path d="M 15 22 L 23 30 L 33 14" fill="none" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
-                    <text x="52" y="24" fill="#273240" font-family="'Segoe UI', 'Microsoft JhengHei'" font-size="16" font-weight="bold" letter-spacing="0.5">AG-MONITOR</text>
-                    <text x="53" y="38" fill="#5B728D" font-family="'Microsoft JhengHei'" font-size="10" font-weight="bold">科技偵查 · 智慧雙軌鑑識系統</text>
-                </svg>
+                <div class="brand-lockup">
+                    <svg class="brand-symbol" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#5B728D"/><rect x="10" y="14" width="44" height="34" rx="6" fill="none" stroke="#FFF" stroke-width="4"/><path d="M14 31H50" stroke="#78A58F" stroke-width="4" stroke-linecap="round"/><circle cx="48" cy="48" r="11" fill="#52745F" stroke="#FFF" stroke-width="2"/><path d="M42.5 48L46.5 52L53.5 44" fill="none" stroke="#FFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                    <div class="brand-lockup-text"><strong>AG-MONITOR</strong><small>智慧影像快篩系統</small></div>
+                </div>
             </div>
 
             <div class="card-section workflow-card">
@@ -933,11 +862,11 @@
                 <div class="workflow-note">1. 匯入影片　2. 選擇情境預設　3. 啟動分析。進階設定可依案件需要再展開。</div>
             </div>
 
-            <!-- 卡片 1: 待處理證物清單 -->
+            <!-- 卡片 1: 待處理影片清單 -->
             <div class="card-section" id="dropCard">
                 <div class="card-title">
                     <span class="card-badge">1</span>
-                    <span>步驟 1：匯入證物</span>
+                    <span>步驟 1：匯入影片</span>
                     <span id="queueSummary" class="card-subhint"><i class="fas fa-hand-pointer"></i> 支援拖曳</span>
                 </div>
                 <div class="btn-group" style="margin-bottom: 8px;">
@@ -970,8 +899,12 @@
                     <div style="margin-bottom: 10px;">
                     <label class="form-label">辨識模型：</label>
                     <select id="aiModel" class="morandi-select" style="margin-bottom: 8px;">
-                        <option value="yolov8n.pt" selected>🏎️ 極速先鋒引擎 (Nano - 速度最快)</option>
-                        <option value="yolov8s.pt">🦅 鷹眼精準引擎 (Small - 遠距/模糊特化)</option>
+                        <option value="yolov8n.pt" selected>YOLOv8n（現有相容回退）</option>
+                        <option value="yolov8s.pt">YOLOv8s（現有相容回退）</option>
+                        <option value="yolo11n.pt">YOLO11n（CPU 輕量）</option>
+                        <option value="yolo11s.pt">YOLO11s（精度平衡）</option>
+                        <option value="yolo12n.pt">YOLO12n（Area Attention 輕量）</option>
+                        <option value="yolo12s.pt">YOLO12s（Area Attention 小目標）</option>
                     </select>
                     
                     <label class="form-label">追蹤與去重方式：</label>
@@ -997,7 +930,7 @@
                 </div>
                 </details>
 
-                <p class="workflow-note"><strong>要找什麼？</strong>未勾選的目標不會列入蒐證結果。</p>
+                <p class="workflow-note"><strong>要找什麼？</strong>未勾選的目標不會列入快篩結果。</p>
                 <div class="checkbox-grid">
                     <label class="checkbox-label"><input type="checkbox" id="cls_person" checked> 行人</label>
                     <label class="checkbox-label"><input type="checkbox" id="cls_bicycle" checked> 單車</label>
@@ -1008,24 +941,30 @@
                 </div>
 
                 <label class="switch-row" style="margin-top: 10px; margin-bottom: 0;">
-                    <input type="checkbox" id="riderAssist" checked> 騎士關聯補償（避免機車與騎士分開蒐證）
+                    <input type="checkbox" id="riderAssist" checked> 騎士關聯補償（避免機車與騎士重複截圖）
                 </label>
             </div>
 
             <details class="advanced-settings auto-ai-controls">
-            <summary>進階設定：空景、停車過濾與蒐證方式</summary>
+            <summary>進階設定：空景、停車過濾與截圖方式</summary>
             <!-- 卡片 3: 無人空景極速調速 -->
             <div class="card-section auto-ai-controls">
                 <div class="card-title">
                     <span class="card-badge">3</span>
                     <span>無人空景極速調速</span>
                 </div>
-                <label class="switch-row">
-                    <input type="checkbox" id="fastMode" checked> 啟用極速背景處理 (關閉實時畫面)
-                </label>
-                <label class="switch-row">
-                    <input type="checkbox" id="filterStationary" checked> 啟用靜止物件過濾 (自動忽略路邊停放車輛)
-                </label>
+                <label class="form-label">執行模式：</label>
+                <div class="mode-grid" id="executionModeGroup">
+                    <label class="mode-option">
+                        <input type="radio" name="executionMode" value="preview" checked>
+                        <span class="mode-option-content"><strong>即時檢視</strong><small>顯示預覽與 ROI，適合互動確認。</small></span>
+                    </label>
+                    <label class="mode-option">
+                        <input type="radio" name="executionMode" value="headless">
+                        <span class="mode-option-content"><strong>全速快篩</strong><small>停止逐幀畫面傳輸，背景全速分析。</small></span>
+                    </label>
+                </div>
+                <p class="workflow-note"><strong>固定規則：</strong>路邊停放與未確認移動的車輛一律忽略，不觸發截圖。</p>
                 <div class="slider-group">
                     <div class="slider-header">
                         <span>空景安全閃現跳躍間隔:</span>
@@ -1035,24 +974,23 @@
                 </div>
             </div>
 
-            <!-- 卡片 4: 蒐證模式設定 -->
+            <!-- 卡片 4: 快篩模式設定 -->
             <div class="card-section auto-ai-controls">
                 <div class="card-title">
                     <span class="card-badge">4</span>
-                    <span>蒐證模式設定</span>
+                    <span>全景截圖輸出</span>
                 </div>
-                <select id="captureMode" class="morandi-select" style="margin-bottom: 8px;">
-                    <option value="雙格蒐證模式 (起點+最清晰)" selected>精華雙格蒐證 (起點格 + 最清晰特徵格)</option>
-                    <option value="持續追蹤模式 (預設)">動態定時連拍 (依設定秒數連續拍照)</option>
-                    <option value="事件起訖模式">進出瞬間捕捉 (僅抓進入與離開首尾兩張)</option>
-                </select>
+                <p class="workflow-note">預設保存完整原解析度畫面；同波新目標合併為一張，不裁切監視器 OSD。</p>
+                <label class="switch-row">
+                    <input type="checkbox" id="burnAnnotations"> 烙印 AI 彩色標註框與類別文字
+                </label>
                 <label class="switch-row">
                     <input type="checkbox" id="singleFolder"> 將本次批次結果集中於單一資料夾
                 </label>
             </div>
             </details>
 
-            <!-- 卡片 5: 戰術啟動區 -->
+            <!-- 卡片 5: 分析啟動區 -->
             <div class="card-section">
                 <div class="card-title">
                     <span class="card-badge">5</span>
@@ -1065,6 +1003,9 @@
                 <button id="btnStartAuto" class="btn btn-start" style="width: 100%; padding: 10px;" onclick="toggleAutoProcessing()">
                     <i class="fas fa-play"></i> 開始分析
                 </button>
+                <button id="btnForceStop" class="btn btn-stop hidden" style="width: 100%; padding: 9px; margin-top: 7px;" onclick="forceStopProcessing()">
+                    <i class="fas fa-bolt"></i> 強制停止並捨棄未寫截圖
+                </button>
             </div>
 
             <!-- 底部版權 -->
@@ -1074,10 +1015,10 @@
             </div>
         </div>
 
-        <!-- 側滑證物清單抽屜 -->
+        <!-- 側滑影片清單抽屜 -->
         <div id="queueDrawer" class="queue-drawer">
             <div class="drawer-header">
-                <span><i class="fas fa-film"></i> 監視器證物清單</span>
+                <span><i class="fas fa-film"></i> 待篩影片清單</span>
                 <button class="drawer-close-btn" onclick="toggleQueueDrawer()"><i class="fas fa-xmark"></i></button>
             </div>
             <div class="queue-box" id="queueList"></div>
@@ -1089,7 +1030,7 @@
             <div class="mode-switcher-bar">
                 <div class="mode-segmented-control">
                     <button id="modeAutoBtn" class="mode-btn active" onclick="switchMode('auto')">
-                        <i class="fas fa-crosshairs"></i> 全自動 AI 蒐證
+                        <i class="fas fa-filter"></i> 全自動 AI 快篩
                     </button>
                     <button id="modeManualBtn" class="mode-btn" onclick="switchMode('manual')">
                         <i class="fas fa-eye"></i> 即時人眼點視
@@ -1102,15 +1043,15 @@
                 <!-- 拖曳高光覆蓋層 -->
                 <div class="drag-drop-overlay" id="dragDropOverlay">
                     <i class="fas fa-cloud-arrow-up"></i>
-                    <h3>放開滑鼠以立即匯入證物</h3>
+                    <h3>放開滑鼠以立即匯入影片</h3>
                     <p>支援單檔、多檔或直接拖入整個監視器資料夾</p>
                 </div>
 
                 <div id="placeholderText" class="placeholder-card" onclick="addVideos()" title="點擊匯入或直接拖曳檔案至此">
                     <div class="placeholder-icon">
-                        <i class="fas fa-shield-halved"></i>
+                        <svg class="brand-symbol brand-symbol-large" viewBox="0 0 64 64" aria-hidden="true"><rect width="64" height="64" rx="14" fill="#5B728D"/><rect x="10" y="14" width="44" height="34" rx="6" fill="none" stroke="#FFF" stroke-width="4"/><path d="M14 31H50" stroke="#78A58F" stroke-width="4" stroke-linecap="round"/><circle cx="48" cy="48" r="11" fill="#52745F" stroke="#FFF" stroke-width="2"/><path d="M42.5 48L46.5 52L53.5 44" fill="none" stroke="#FFF" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>
                     </div>
-                    <div class="placeholder-title">AG-Forensic-Player 科技偵查戰術播放器</div>
+                    <div class="placeholder-title">AG-MONITOR 智慧影像快篩系統</div>
                     <ul class="placeholder-steps">
                         <li><span class="badge-step">1</span> 直接將影片或監視器資料夾<b>拖曳至此處</b>，或點擊左側匯入</li>
                         <li><span class="badge-step">2</span> 支援 .mp4, .265, .h265, .264, .dav 原生裸流極速解碼</li>
@@ -1163,40 +1104,15 @@
                     </div>
                 </div>
                 <div id="analysisSummary" class="analysis-summary"></div>
+                <div id="writerStatus" class="writer-status hidden" aria-live="polite">
+                    <div class="writer-stat">場景事件<strong id="writerEvents">0</strong></div>
+                    <div class="writer-stat">完成寫入<strong id="writerWritten">0</strong></div>
+                    <div class="writer-stat">等待佇列<strong id="writerQueued">0</strong></div>
+                    <div class="writer-stat">寫入狀態<strong id="writerState">待命</strong></div>
+                </div>
 
                 <div class="log-box" id="logBox">
                     <div class="log-entry info">系統已初始化，等待任務...</div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- 主視圖：數位鑑識照片修復 (SR View) -->
-    <div id="viewSR" class="main-view">
-        <div class="sr-controls">
-            <input type="file" id="srFileInput" accept="image/*" class="hidden">
-            <button class="btn btn-default" onclick="document.getElementById('srFileInput').click()"><i class="fas fa-image"></i> 選擇圖片</button>
-            <div class="sr-mode-select">
-                <label><input type="radio" name="srMode" value="plate" checked> 🚗 文字車牌 (強化邊緣)</label>
-                <label><input type="radio" name="srMode" value="face"> 👤 人像五官 (降噪平滑)</label>
-            </div>
-            <button id="btnStartSR" class="btn btn-start" onclick="startSR()"><i class="fas fa-bolt"></i> 開始 AI 高畫質化</button>
-            <button id="btnAbortSR" class="btn btn-stop" style="display:none;" onclick="abortSR()"><i class="fas fa-xmark"></i> 中止修復</button>
-            <button id="btnSaveSR" class="btn btn-folder" onclick="saveSR()"><i class="fas fa-floppy-disk"></i> 儲存高畫質證物</button>
-        </div>
-        <div class="sr-workspace">
-            <div class="sr-panel sr-panel-left">
-                <div class="sr-panel-title"><i class="fas fa-magnifying-glass"></i> 【原始證物格】</div>
-                <div class="sr-canvas-wrap" id="srLeftWrap">
-                    <span id="srLeftPlaceholder" style="color: var(--text-muted); font-size: 13px;">點擊上方按鈕選擇或拖曳證物圖片至此</span>
-                    <img id="srOriginalImg" src="" style="display:none; max-width:100%; max-height:100%; object-fit:contain;">
-                </div>
-            </div>
-            <div class="sr-panel sr-panel-right">
-                <div class="sr-panel-title"><i class="fas fa-wand-magic-sparkles"></i> 【AI 重建格】</div>
-                <div class="sr-canvas-wrap">
-                    <span id="srRightPlaceholder" style="color: var(--text-muted); font-size: 13px;">等待 AI 重建...</span>
-                    <img id="srEnhancedImg" src="" style="display:none; max-width:100%; max-height:100%; object-fit:contain;">
                 </div>
             </div>
         </div>
@@ -1206,35 +1122,30 @@
     <div id="helpModal" style="display: none; position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(39, 50, 64, 0.65); z-index: 9999; justify-content: center; align-items: center; backdrop-filter: blur(4px);">
         <div style="background: #FFFFFF; border: 1px solid var(--morandi-border); box-shadow: var(--shadow-lg); width: 90%; max-width: 760px; max-height: 85vh; display: flex; flex-direction: column; border-radius: var(--radius-lg); overflow: hidden;">
             <div style="padding: 14px 20px; border-bottom: 1px solid var(--morandi-border); display: flex; justify-content: space-between; align-items: center; background: var(--morandi-bg-panel);">
-                <span style="color: var(--morandi-slate); font-weight: 700; font-size: 16px;"><i class="fas fa-book-bookmark"></i> AG-MONITOR 系統操作手冊</span>
+                <span style="color: var(--morandi-slate); font-weight: 700; font-size: 16px;"><i class="fas fa-book-bookmark"></i> AG-MONITOR 智慧影像快篩系統操作手冊</span>
                 <button onclick="document.getElementById('helpModal').style.display='none'" style="background: transparent; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; transition: 0.2s;" onmouseover="this.style.color='var(--text-primary)'" onmouseout="this.style.color='var(--text-muted)'">&times;</button>
             </div>
             <div style="padding: 22px 28px; overflow-y: auto; line-height: 1.7; font-size: 13.5px; color: var(--text-primary);">
-                <h3 style="color: var(--morandi-slate); margin-bottom: 8px; border-bottom: 1px solid var(--morandi-border-light); padding-bottom: 4px;"><i class="fas fa-crosshairs"></i> 模式一：全自動 AI 蒐證</h3>
+                <h3 style="color: var(--morandi-slate); margin-bottom: 8px; border-bottom: 1px solid var(--morandi-border-light); padding-bottom: 4px;"><i class="fas fa-filter"></i> 模式一：全自動 AI 快篩</h3>
                 <p style="margin-bottom: 12px; color: var(--text-secondary);">適合大量監視器影片或長時間無人空景的自動化過濾與精華截圖。</p>
                 <ol style="margin-left: 20px; margin-bottom: 18px; color: var(--text-primary);">
-                    <li style="margin-bottom: 6px;"><strong>匯入證物：</strong>直接拖曳影片或資料夾至畫面，或點擊左側「匯入影片」/「匯入資料夾」，通吃 .mp4, .265, .dav 等非標準裸流。</li>
+                    <li style="margin-bottom: 6px;"><strong>匯入影片：</strong>直接拖曳影片或資料夾至畫面，或點擊左側「匯入影片」/「匯入資料夾」，支援 .mp4、.265、.dav 等非標準裸流。</li>
                     <li style="margin-bottom: 6px;"><strong>畫定防線：</strong>在中央畫面上點擊滑鼠左鍵畫出多邊形 ROI 防線（點擊「清除 ROI」可重繪）。</li>
-                    <li style="margin-bottom: 6px;"><strong>設定參數：</strong>選擇 AI 核心引擎、設定靈敏度與目標車種，並挑選蒐證模式。</li>
+                    <li style="margin-bottom: 6px;"><strong>設定參數：</strong>選擇 AI 核心引擎、設定靈敏度與目標車種，並挑選快篩模式。</li>
                     <li style="margin-bottom: 6px;"><strong>啟動過濾：</strong>點擊「啟動全自動 AI 過濾」，完成後點擊「截圖資料夾」檢視產出成果。</li>
                 </ol>
 
                 <h3 style="color: var(--morandi-slate); margin-bottom: 8px; border-bottom: 1px solid var(--morandi-border-light); padding-bottom: 4px;"><i class="fas fa-eye"></i> 模式二：即時人眼點視</h3>
-                <p style="margin-bottom: 12px; color: var(--text-secondary);">作為專業級鑑識播放器，支援逐格精確點視與手動快門。</p>
+                <p style="margin-bottom: 12px; color: var(--text-secondary);">支援逐格精確點視與手動全景快門，方便人工覆核快篩結果。</p>
                 <ul style="margin-left: 20px; margin-bottom: 18px; color: var(--text-primary);">
                     <li style="margin-bottom: 6px;">點擊右上方切換至「即時人眼點視」模式。</li>
                     <li style="margin-bottom: 6px;">下方出現播放控制列，支援 1x～16x 倍速快轉與倒放。</li>
                     <li style="margin-bottom: 6px;"><strong>快捷鍵支援：</strong>空白鍵 (播放/暫停)、左方向鍵 (倒退一格)、右方向鍵 (前進一格)。</li>
                     <li style="margin-bottom: 6px;"><strong>手動快門：</strong>看到關鍵畫面時按下快捷鍵 <kbd style="background: var(--morandi-bg-subtle); padding: 2px 6px; border-radius: 4px; font-weight: bold; border: 1px solid var(--morandi-border);">C</kbd> 進行無損截圖。</li>
                 </ul>
-
-                <h3 style="color: var(--morandi-slate); margin-bottom: 8px; border-bottom: 1px solid var(--morandi-border-light); padding-bottom: 4px;"><i class="fas fa-wand-magic-sparkles"></i> 模式三：數位鑑識照片修復 (SR)</h3>
-                <p style="margin-bottom: 12px; color: var(--text-secondary);">針對模糊車牌或人像五官進行深度學習超解析重建。</p>
-                <ul style="margin-left: 20px; margin-bottom: 18px; color: var(--text-primary);">
-                    <li style="margin-bottom: 6px;">點擊最上方頁籤切換至「數位鑑識照片修復」。</li>
-                    <li style="margin-bottom: 6px;">匯入或拖曳模糊照片至原始證物格，選擇車牌或人像模式。</li>
-                    <li style="margin-bottom: 6px;">點擊「開始 AI 高畫質化」，完成後可直接「儲存高畫質證物」。</li>
-                </ul>
+            </div>
+        </div>
+    </div>
             </div>
         </div>
     </div>
@@ -1271,22 +1182,8 @@
             if(isProcessing) eel.update_live_setting('skipSec', val)();
         };
 
-        const fastModeCb = document.getElementById("fastMode");
-        fastModeCb.onchange = function() {
-            if(isProcessing) eel.update_live_setting('fastMode', this.checked)();
-        };
-
-        const filterStationaryCb = document.getElementById("filterStationary");
-        filterStationaryCb.onchange = function() {
-            if(isProcessing) eel.update_live_setting('filterStationary', this.checked)();
-        };
-
-        document.getElementById("captureMode").onchange = function() {
-            if(isProcessing) eel.update_live_setting('captureMode', this.value)();
-        };
-
         document.getElementById("inferenceSize").onchange = function() {
-            if(isProcessing) eel.update_live_setting('inferenceSize', parseInt(this.value));
+            if(isProcessing) eel.update_live_setting('inferenceSize', parseInt(this.value))();
         };
 
         document.getElementById("riderAssist").onchange = function() {
@@ -1309,9 +1206,9 @@
 
         function applyPreset(name) {
             const presets = {
-                standard: { model: 'yolov8n.pt', tracker: 'bytetrack', size: '960', skip: '0.2', stationary: true, hint: '一般路口：平衡辨識速度，過濾停放車輛。' },
-                distant: { model: 'yolov8s.pt', tracker: 'botsort_reid', size: '1280', skip: '0.2', stationary: true, hint: '遠距小目標：提高解析度與模型精度，處理時間較長。' },
-                occlusion: { model: 'yolov8n.pt', tracker: 'botsort_reid', size: '960', skip: '0.1', stationary: true, hint: '遮蔽車流：加強同一目標跨短暫遮蔽的追蹤。' }
+                standard: { model: 'yolo11n.pt', tracker: 'bytetrack', size: '960', skip: '0.2', hint: '一般路口：YOLO11n 平衡辨識速度，過濾停放車輛。' },
+                distant: { model: 'yolo12s.pt', tracker: 'botsort_reid', size: '1280', skip: '0.2', hint: '遠距小目標：YOLO12s Area Attention，提高解析度與精度。' },
+                occlusion: { model: 'yolo11s.pt', tracker: 'botsort_reid', size: '960', skip: '0.1', hint: '遮蔽車流：YOLO11s 搭配 ReID，加強短暫遮蔽追蹤。' }
             };
             const preset = presets[name];
             if(!preset || isProcessing) return;
@@ -1319,7 +1216,6 @@
             document.getElementById('trackerMode').value = preset.tracker;
             document.getElementById('inferenceSize').value = preset.size;
             document.getElementById('skipSecSlider').value = preset.skip;
-            document.getElementById('filterStationary').checked = preset.stationary;
             skipSecSlider.oninput();
             document.getElementById('presetHint').textContent = '目前：' + preset.hint;
         }
@@ -1385,7 +1281,7 @@
             }
             
             appendLog(`智能校正檔名完成！共修改了 ${res.count} 個檔案`, "success");
-            alert(`✅ 檔案名稱已全部校正完畢！\n\n系統已修改了 ${res.count} 個實體檔案。\n您可以直接開始進行 AI 證據過濾了！`);
+            alert(`✅ 檔案名稱已全部校正完畢！\n\n系統已修改了 ${res.count} 個實體檔案。\n您可以直接開始進行 AI 影像快篩了！`);
         }
         
         function showUnifiedProgress(label, pct) {
@@ -1425,9 +1321,9 @@
             
             let btn = document.getElementById('btnStartAuto');
             if(mode === 'auto') {
-                btn.innerHTML = '<i class="fas fa-play"></i> 啟動全自動 AI 過濾';
+                btn.innerHTML = '<i class="fas fa-play"></i> 開始分析';
             } else {
-                btn.innerHTML = '<i class="fas fa-video"></i> 載入戰術播放引擎';
+                btn.innerHTML = '<i class="fas fa-video"></i> 載入逐格播放引擎';
             }
             
             eel.set_engine_mode(mode)();
@@ -1518,7 +1414,7 @@
                     let added = await eel.add_dropped_paths(droppedPaths)();
                     if(added && added.length > 0) {
                         populateQueueList(added);
-                        appendLog(`🎯 拖曳匯入成功！已新增 ${added.length} 支證物影片至清單`, "success");
+                        appendLog(`🎯 拖曳匯入成功！已新增 ${added.length} 支影片至清單`, "success");
                     } else {
                         appendLog("拖曳之檔案已存在於清單或非支援之視訊格式", "warn");
                     }
@@ -1527,7 +1423,7 @@
                     let res = await eel.resolve_and_add_dropped_files(fileMetadataList)();
                     if(res && res.success && res.added_paths.length > 0) {
                         populateQueueList(res.added_paths);
-                        appendLog(`🎯 智慧拖曳成功！已自動定位並匯入 ${res.added_paths.length} 支證物影片`, "success");
+                        appendLog(`🎯 智慧拖曳成功！已自動定位並匯入 ${res.added_paths.length} 支影片`, "success");
                     } else {
                         appendLog("未在專案或常用路徑中搜尋到該檔案，正在開啟定位對話框...", "info");
                         addVideos();
@@ -1558,22 +1454,26 @@
             eel.open_capture_folder()();
         }
 
+        function setProcessingControls(locked) {
+            const selector = '#aiModel, #trackerMode, #inferenceSize, #confSlider, #skipSecSlider, #riderAssist, #burnAnnotations, #singleFolder, input[name="executionMode"], .checkbox-grid input';
+            document.querySelectorAll(selector).forEach(control => control.disabled = locked);
+            document.querySelectorAll('.preset-btn').forEach(button => button.disabled = locked);
+        }
+
         async function toggleAutoProcessing() {
-            let btn = document.getElementById("btnStartAuto");
+            const btn = document.getElementById("btnStartAuto");
             if(isProcessing) {
-                btn.innerHTML = currentMode === 'auto' ? '<i class="fas fa-play"></i> 啟動全自動 AI 過濾' : '<i class="fas fa-video"></i> 載入戰術播放引擎';
-                btn.className = "btn btn-start";
-                document.getElementById("aiModel").disabled = false;
-                document.getElementById("trackerMode").disabled = false;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-hourglass-half"></i> 正在停止並完成寫入';
                 eel.request_stop()();
                 return;
             }
-            
+
+            const executionMode = document.querySelector('input[name="executionMode"]:checked').value;
             let settings = {
                 aiModel: document.getElementById("aiModel").value,
                 trackerMode: document.getElementById("trackerMode").value,
                 confThresh: parseFloat(confSlider.value),
-                captureMode: document.getElementById("captureMode").value,
                 classes: {
                     "0": document.getElementById("cls_person").checked,
                     "1": document.getElementById("cls_bicycle").checked,
@@ -1582,26 +1482,53 @@
                     "5": document.getElementById("cls_bus").checked,
                     "7": document.getElementById("cls_truck").checked
                 },
-                fastMode: fastModeCb.checked,
-                filterStationary: filterStationaryCb.checked,
+                executionMode: executionMode,
+                burnAnnotations: document.getElementById("burnAnnotations").checked,
                 skipSec: parseFloat(skipSecSlider.value),
                 singleFolder: document.getElementById("singleFolder").checked,
                 inferenceSize: parseInt(document.getElementById("inferenceSize").value),
                 riderAssist: document.getElementById("riderAssist").checked
             };
-            
-            btn.innerHTML = currentMode === 'auto' ? '<i class="fas fa-stop"></i> 停止全自動分析' : '<i class="fas fa-stop"></i> 關閉播放引擎';
+
+            btn.innerHTML = '<i class="fas fa-stop"></i> 停止並完成寫入';
             btn.className = "btn btn-stop";
-            document.getElementById("aiModel").disabled = true;
-            document.getElementById("trackerMode").disabled = true;
+            btn.disabled = false;
+            setProcessingControls(true);
+            document.getElementById('btnForceStop').classList.remove('hidden');
+            document.getElementById('writerStatus').classList.remove('hidden');
             isProcessing = true;
-            
+
             document.getElementById("logBox").innerHTML = "";
             document.getElementById('analysisSummary').style.display = 'block';
-            document.getElementById('analysisSummary').innerHTML = `<strong>分析準備中</strong>｜${document.getElementById('queueList').children.length} 支影片｜停放車輛過濾：${settings.filterStationary ? '開啟' : '關閉'}｜追蹤：${document.getElementById('trackerMode').selectedOptions[0].text}`;
-            appendLog(currentMode === 'auto' ? ">>> 系統啟動，全記憶體零延遲解碼引擎發動..." : ">>> 戰術播放引擎已載入，請使用下方控制列操作", "info");
-            
-            await eel.start_processing(settings)();
+            document.getElementById('analysisSummary').innerHTML = `<strong>分析準備中</strong>｜${executionMode === 'headless' ? '全速快篩' : '即時檢視'}｜${document.getElementById('queueList').children.length} 支影片｜追蹤：${document.getElementById('trackerMode').selectedOptions[0].text}`;
+            appendLog(executionMode === 'headless' ? ">>> 全速快篩啟動，不傳送逐幀預覽" : ">>> 即時檢視啟動，可在畫面確認 ROI 與目標", "info");
+
+            let result;
+            try {
+                result = await eel.start_processing(settings)();
+            } catch(error) {
+                result = { success: false, msg: `後端連線或啟動失敗：${error && error.message ? error.message : error}` };
+            }
+            if(!result || !result.success) {
+                isProcessing = false;
+                setProcessingControls(false);
+                document.getElementById('btnForceStop').classList.add('hidden');
+                document.getElementById('writerStatus').classList.add('hidden');
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-play"></i> 開始分析';
+                btn.className = "btn btn-start";
+                const failureMessage = result && result.msg ? result.msg : '分析無法啟動';
+                document.getElementById('analysisSummary').innerHTML = `<strong>啟動失敗</strong>｜${failureMessage}`;
+                appendLog(failureMessage, 'error');
+            }
+        }
+
+        function forceStopProcessing() {
+            if(!isProcessing) return;
+            const forceBtn = document.getElementById('btnForceStop');
+            forceBtn.disabled = true;
+            forceBtn.innerHTML = '<i class="fas fa-bolt"></i> 正在強制停止';
+            eel.request_force_stop()();
         }
 
         // Eel Exposed Functions
@@ -1622,7 +1549,7 @@
                 document.getElementById("timeDisplay").textContent = timecode;
             }
             if(isProcessing) {
-                showUnifiedProgress("🕵️ AI 證據全自動過濾分析中", parseFloat(percent));
+                showUnifiedProgress("AI 全景快篩分析中", parseFloat(percent));
                 document.getElementById('analysisSummary').style.display = 'block';
                 document.getElementById('analysisSummary').innerHTML = `<strong>分析中 ${parseFloat(percent).toFixed(1)}%</strong>｜目前時間：${timecode || '準備中'}｜靜止與重複目標將依目前設定自動過濾`;
             }
@@ -1646,20 +1573,38 @@
             box.scrollTop = box.scrollHeight;
         }
 
+        eel.expose(updateWriterStatus);
+        function updateWriterStatus(stats={}) {
+            const stateLabels = {
+                normal: '正常', backpressure: '寫入落後', flushing: '排空中',
+                completed: '已完成', cancelled: '已取消', error: '錯誤'
+            };
+            document.getElementById('writerStatus').classList.remove('hidden');
+            document.getElementById('writerEvents').textContent = stats.events || 0;
+            document.getElementById('writerWritten').textContent = stats.written || 0;
+            document.getElementById('writerQueued').textContent = stats.queued || 0;
+            document.getElementById('writerState').textContent = stateLabels[stats.state] || '待命';
+        }
+
         eel.expose(processingFinished);
-        function processingFinished() {
+        function processingFinished(summary={}) {
             isProcessing = false;
             hideUnifiedProgress();
             let btn = document.getElementById("btnStartAuto");
-            btn.innerHTML = currentMode === 'auto' ? '<i class="fas fa-play"></i> 啟動全自動 AI 過濾' : '<i class="fas fa-video"></i> 載入戰術播放引擎';
+            btn.innerHTML = '<i class="fas fa-play"></i> 開始分析';
             btn.className = "btn btn-start";
-            document.getElementById("aiModel").disabled = false;
-            document.getElementById("trackerMode").disabled = false;
+            btn.disabled = false;
+            setProcessingControls(false);
+            const forceBtn = document.getElementById('btnForceStop');
+            forceBtn.classList.add('hidden');
+            forceBtn.disabled = false;
+            forceBtn.innerHTML = '<i class="fas fa-bolt"></i> 強制停止並捨棄未寫截圖';
             document.getElementById("progressText").textContent = "0%";
             document.getElementById("timeline").value = 0;
             document.getElementById('analysisSummary').style.display = 'block';
-            document.getElementById('analysisSummary').innerHTML = '<strong>任務已結束</strong>｜請開啟截圖資料夾檢視結果與鑑識紀錄。';
-            appendLog(">>> 任務結束或已手動中止", "info");
+            const forcedText = summary.forced ? `｜已捨棄 ${summary.discarded || 0} 張` : '';
+            document.getElementById('analysisSummary').innerHTML = `<strong>${summary.forced ? '已強制停止' : '任務已結束'}</strong>｜場景 ${summary.events || 0}｜完成寫入 ${summary.written || 0}｜錯誤 ${summary.errors || 0}${forcedText}｜輸出：${summary.outputDir || 'captures/'}`;
+            appendLog(summary.forced ? ">>> 強制停止完成，未寫入截圖已捨棄" : ">>> 任務結束，截圖佇列已完成寫入", summary.forced ? "warn" : "info");
         }
 
         let currentBoxes = [];
@@ -1815,7 +1760,7 @@
                 // 4. 防線 HUD 標籤
                 if(roiPoints.length >= 1) {
                     let p0 = roiPoints[0];
-                    let tagText = "🛡️ ROI 鑑識防護區";
+                    let tagText = "ROI 快篩範圍";
                     ctx.font = "bold 12px 'Segoe UI', 'Microsoft JhengHei', sans-serif";
                     let tagW = ctx.measureText(tagText).width;
                     let tagX = Math.max(10, p0[0] - 10);
@@ -1855,145 +1800,6 @@
             }
         });
 
-        // Global Tab Switch Logic
-        function switchMainTab(tab) {
-            document.getElementById("mainTabPlayer").className = tab === 'player' ? "global-tab-btn active" : "global-tab-btn";
-            document.getElementById("mainTabSR").className = tab === 'sr' ? "global-tab-btn active" : "global-tab-btn";
-            
-            document.getElementById("viewPlayer").className = tab === 'player' ? "main-view active" : "main-view";
-            document.getElementById("viewSR").className = tab === 'sr' ? "main-view active" : "main-view";
-        }
-
-        // SR Workspace Logic
-        let srOriginalBase64 = null;
-        let srEnhancedBase64 = null;
-        let isSRProcessing = false;
-
-        document.getElementById('srFileInput').addEventListener('change', function(e) {
-            const file = e.target.files[0];
-            if(file) {
-                const reader = new FileReader();
-                reader.onload = function(evt) {
-                    srOriginalBase64 = evt.target.result.split(',')[1];
-                    document.getElementById('srOriginalImg').src = evt.target.result;
-                    document.getElementById('srOriginalImg').style.display = 'block';
-                    document.getElementById('srLeftPlaceholder').style.display = 'none';
-                    
-                    document.getElementById('srEnhancedImg').style.display = 'none';
-                    document.getElementById('srRightPlaceholder').style.display = 'block';
-                    document.getElementById('srRightPlaceholder').textContent = '圖片已載入，請點擊開始 AI 高畫質化';
-                    srEnhancedBase64 = null;
-                };
-                reader.readAsDataURL(file);
-            }
-        });
-
-        // Drag & Drop for Photo Repair
-        const srCanvasWrap = document.getElementById('srLeftWrap');
-        srCanvasWrap.addEventListener('dragover', function(e) {
-            e.preventDefault();
-            srCanvasWrap.classList.add('drag-active');
-        });
-        
-        srCanvasWrap.addEventListener('dragleave', function(e) {
-            e.preventDefault();
-            srCanvasWrap.classList.remove('drag-active');
-        });
-        
-        srCanvasWrap.addEventListener('drop', function(e) {
-            e.preventDefault();
-            srCanvasWrap.classList.remove('drag-active');
-            
-            const files = e.dataTransfer.files;
-            if (files && files.length > 0) {
-                const file = files[0];
-                if (file.type.startsWith('image/')) {
-                    const reader = new FileReader();
-                    reader.onload = function(evt) {
-                        srOriginalBase64 = evt.target.result.split(',')[1];
-                        document.getElementById('srOriginalImg').src = evt.target.result;
-                        document.getElementById('srOriginalImg').style.display = 'block';
-                        document.getElementById('srLeftPlaceholder').style.display = 'none';
-                        
-                        document.getElementById('srEnhancedImg').style.display = 'none';
-                        document.getElementById('srRightPlaceholder').style.display = 'block';
-                        document.getElementById('srRightPlaceholder').textContent = '圖片已載入，請點擊開始 AI 高畫質化';
-                        srEnhancedBase64 = null;
-                    };
-                    reader.readAsDataURL(file);
-                } else {
-                    alert("請拖曳圖片格式檔案！");
-                }
-            }
-        });
-
-        async function startSR() {
-            if(isSRProcessing) return;
-            if(!srOriginalBase64) {
-                alert("請先選擇一張原始證物圖片！");
-                return;
-            }
-            
-            isSRProcessing = true;
-            let btn = document.getElementById("btnStartSR");
-            btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> AI 鑑識運算中...';
-            btn.style.opacity = "0.6";
-            btn.style.cursor = "not-allowed";
-            
-            document.getElementById("btnAbortSR").style.display = "inline-flex";
-            
-            document.getElementById('srRightPlaceholder').style.display = 'block';
-            document.getElementById('srRightPlaceholder').textContent = '🧠 載入深度學習模型並進行像素重建... (或從雲端拉取權重檔)';
-            document.getElementById('srEnhancedImg').style.display = 'none';
-            
-            let mode = document.querySelector('input[name="srMode"]:checked').value;
-            eel.run_ai_super_resolution(srOriginalBase64, mode)();
-        }
-
-        function abortSR() {
-            if(!isSRProcessing) return;
-            eel.abort_ai_super_resolution()();
-            
-            isSRProcessing = false;
-            let btn = document.getElementById("btnStartSR");
-            btn.innerHTML = '<i class="fas fa-bolt"></i> 開始 AI 高畫質化';
-            btn.style.opacity = "1";
-            btn.style.cursor = "pointer";
-            
-            document.getElementById("btnAbortSR").style.display = "none";
-            document.getElementById('srRightPlaceholder').style.display = 'block';
-            document.getElementById('srRightPlaceholder').textContent = '⚠️ 已經強制中止修復進程，系統資源已釋放。';
-        }
-
-        eel.expose(on_super_res_finished);
-        function on_super_res_finished(base64Data, errorMsg) {
-            isSRProcessing = false;
-            let btn = document.getElementById("btnStartSR");
-            btn.innerHTML = '<i class="fas fa-bolt"></i> 開始 AI 高畫質化';
-            btn.style.opacity = "1";
-            btn.style.cursor = "pointer";
-            
-            document.getElementById("btnAbortSR").style.display = "none";
-
-            if(errorMsg) {
-                document.getElementById('srRightPlaceholder').innerHTML = `<span style="color:var(--morandi-rose);">${errorMsg}</span>`;
-            } else if (base64Data) {
-                srEnhancedBase64 = base64Data;
-                document.getElementById('srEnhancedImg').src = "data:image/jpeg;base64," + base64Data;
-                document.getElementById('srEnhancedImg').style.display = 'block';
-                document.getElementById('srRightPlaceholder').style.display = 'none';
-            }
-        }
-
-        function saveSR() {
-            if(isSRProcessing) return;
-            if(!srEnhancedBase64) {
-                alert("沒有可儲存的高畫質重建結果！");
-                return;
-            }
-            let mode = document.querySelector('input[name="srMode"]:checked').value;
-            eel.save_enhanced_evidence(srEnhancedBase64, mode)();
-        }
     </script>
 </body>
 </html>

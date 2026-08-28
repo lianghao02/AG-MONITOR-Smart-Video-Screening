@@ -1,8 +1,10 @@
-# AG-MONITOR 科技偵查・智慧雙軌鑑識工作站 v3.1.0
+# AG-MONITOR 智慧影像快篩系統
+
+技術識別名稱：`AG-MONITOR-Smart-Video-Screening`
 
 ## 技術架構現況（2026-08-24）
 
-本專案主力為 **Python 3.13**，以 PyAV、OpenCV、Ultralytics YOLO 與 LAP 組成視訊鑑識與 AI 追蹤管線。因模型、影音解碼與演算法調校高度依賴 Python 生態系，現階段不進行 C#、Rust 或 Web 重寫；未來僅在量測出明確瓶頸時評估將個別 CPU 密集元件抽換為原生核心。
+本專案主力為 **Python 3.13**，以 PyAV、OpenCV、Ultralytics YOLO 與 LAP 組成智慧影像快篩與 AI 追蹤管線。因模型、影音解碼與演算法調校高度依賴 Python 生態系，現階段不進行 C#、Rust 或 Web 重寫；未來僅在量測出明確瓶頸時評估將個別 CPU 密集元件抽換為原生核心。
 
 ## 下載、依賴與啟動
 
@@ -10,23 +12,24 @@
 - **核心套件**：PyAV、Eel、OpenCV、Ultralytics YOLO、lap；完整固定版本見 `requirements.txt`，可攜版補充套件見 `portable-requirements.txt`。
 - **推薦啟動**：下載並解壓完整專案後雙擊 `RUN.bat`。若沒有 Python，`setup_and_run.ps1` 會建立專案內的 `python_embed` 並安裝依賴。
 - **手動安裝**：`py -3.13 -m venv .venv`，啟用後執行 `python -m pip install -r requirements.txt`，再執行 `python main.py`。
-- **網路需求**：首次建立環境、安裝套件或下載 YOLO／Real-ESRGAN 模型時需要網路；已備妥 `python_embed`、套件與模型後可離線啟動。
-- **打包／移機**：保留完整專案與已建好的 `python_embed`；不要只複製 `main.py`。模型與證物資料不應提交至 GitHub。
+- **網路需求**：首次建立環境、安裝套件或取得 YOLO 模型時需要網路；已備妥 `python_embed`、套件與模型後可離線啟動。
+- **打包／移機**：保留完整專案與已建好的 `python_embed`；不要只複製 `main.py`。模型與原始影片不應提交至 GitHub。
 
 ## 專案簡介
-專為台灣警務鑑識實戰設計，通吃 `.h265`, `.dav`, `.264`, `.avi` 等極端監視器裸流的無損戰術播放器；並結合雙模態 AI 蒐證追蹤，與針對「文字車牌 / 人像五官」自適應降噪超解析的數位照片修復工作站。
+專為大量監視器影片調閱設計，通吃 `.h265`、`.dav`、`.264`、`.avi` 等非標準監視器裸流，結合 AI 追蹤、空景快轉、靜止車輛過濾與全景精華截圖。
 
 ### ✨ 核心強項與獨家演算法
 - **零拷貝極速解碼**：專為非標準監控影音流 (Raw Stream) 打造，跳脫傳統辦案轉檔曠日費時的痛點。
 - **智慧空景快轉 (Time-Jump)**：無人畫面自動幻燈片躍遷；一旦偵測到目標，無縫切換回流暢實時追蹤。
 - **台灣常見車種全覆蓋**：精準辨識人(Person)、單車(Bicycle)、一般汽車(Car)、機車(Moto)、公車客運(Bus)、大貨車(Truck)。
-- **鑑識級抗干擾追蹤 (Anti-Jitter)**：搭載「絕對位移判定演算法」與「機車騎士智慧融合邊界框」，完美消除路面標線抖動誤報與人車分離雙重截圖的困擾。
-- **全自動蒐證日誌 (Audit Log)**：每次執行全自動分析，系統將於背景自動寫入帶有精確時間戳記的 `系統鑑識紀錄.txt`，清楚還原所有目標出現軌跡與檔案錯誤歷程。
+- **實務級抗干擾追蹤 (Anti-Jitter)**：搭載「絕對位移判定演算法」與「機車騎士智慧融合邊界框」，降低路面標線抖動誤報與人車分離雙重截圖。
+- **全景精華截圖**：新移動目標進場時以完整監視器畫面保存，同波人車合併為一張，並可選擇是否烙印 AI 彩色標註框。
+- **全速 Headless 快篩**：批次處理時可停止逐幀預覽傳輸，讓 PyAV 解碼、YOLO 推論與非同步影像寫入各自運作。
 
 ## 快速開始
-**一鍵雙軌啟動 (推薦)**
+**一鍵啟動（推薦）**
 直接雙擊專案目錄下的 `RUN.bat` 即可全自動啟動！
-*若環境中缺乏 Python，系統將自動尋找隨身碟內的便攜核心進行「綠色盲開」。*
+*若環境中缺少 Python，系統會自動尋找可攜執行環境。*
 
 **手動啟動指令**
 ```bash
@@ -39,9 +42,9 @@ python main.py
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup_and_run.ps1 -NoLaunch
 ```
 
-## 鑑識可追溯性
+## 快篩輸出
 
-每支影片開始分析前，系統會將原始路徑、檔案大小、修改時間與 SHA-256 寫入本次鑑識紀錄。若無法完成雜湊，該影片不會進入分析，避免產生無法對應原始證物的截圖。
+自動分析不會在開始前掃描整支影片計算 SHA-256，也不產生截圖 JSONL 清冊。截圖直接輸出至 `captures/`，檔名格式為 `{影片名稱}_{時分秒}_ID{首個目標ID}_{類型}.jpg`。安全批次重新命名仍保留獨立雜湊交易，避免檔案搬移時發生內容錯置。
 
 ## 自動化測試
 
@@ -56,15 +59,16 @@ python_embed\python.exe -B tests\test_real_videos.py -v
 ## 技術棧
 - **PyAV** (零拷貝全記憶體極速解碼，解決壞軌容錯)
 - **Ultralytics YOLOv8 & ByteTrack** (強健的多目標辨識與軌跡追蹤)
-- **OpenCV Contrib** (Bilateral Filter 降噪與 ESPCN 影像超解析引擎)
+- **OpenCV**（ROI、動態引導、影像標註與 JPEG 編碼）
 - **Eel** (輕量化 WebSocket 前後端通訊與現代化 UI 渲染)
 
 後續功能規劃與實作紀錄請參閱 [`docs/FUTURE_ROADMAP.md`](docs/FUTURE_ROADMAP.md) 與 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)。
 
-## v3.1.0 安全與驗證補充
+## 快篩安全與驗證補充
 
-- 截圖採零覆寫命名，並將容量、SHA-256、時間碼與目標寫入 `鑑識截圖清冊.jsonl`。
+- 截圖採零覆寫命名，保留原始解析度與監視器角落 OSD；預設不修改畫面內容。
+- 正常停止會排空 Writer Queue；強制停止會立即捨棄尚未寫入的截圖事件。
 - Base64 影像輸入設有型別、格式及容量限制；寫檔失敗時不會回報成功。
 - 預設埠號被占用時會依序嘗試備援埠號。
 - Python 3.13 為主要開發與驗證版本。
-- AI 偵測結果僅供人工研判，不能取代原始證物、鑑識程序或承辦人判斷。
+- AI 偵測結果僅供人工快篩與研判，不能取代原始影片或承辦人判斷。

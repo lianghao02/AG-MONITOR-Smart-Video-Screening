@@ -6,7 +6,9 @@ from pathlib import Path
 
 PROJECT_DIR = Path(__file__).resolve().parent
 os.environ.setdefault("YOLO_CONFIG_DIR", str(PROJECT_DIR / "captures" / ".ultralytics"))
+os.environ.setdefault("MPLCONFIGDIR", str(PROJECT_DIR / "captures" / ".matplotlib"))
 Path(os.environ["YOLO_CONFIG_DIR"]).mkdir(parents=True, exist_ok=True)
+Path(os.environ["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
 
 EXPECTED_VERSIONS = {
     "av": "17.1.0",

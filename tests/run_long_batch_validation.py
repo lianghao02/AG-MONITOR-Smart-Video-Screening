@@ -1,4 +1,4 @@
-"""以四支實體影片執行完整批次，輸出可稽核的長時間測試報告。"""
+"""以四支實體影片執行完整 Headless 批次，輸出效能測試摘要。"""
 
 import json
 import multiprocessing
@@ -22,12 +22,14 @@ import main
 class HeadlessEel:
     def __init__(self):
         self.counts = {}
+        self.last_args = {}
         self.lock = threading.Lock()
 
     def __getattr__(self, name):
-        def call(*_args, **_kwargs):
+        def call(*args, **_kwargs):
             with self.lock:
                 self.counts[name] = self.counts.get(name, 0) + 1
+                self.last_args[name] = args
             return lambda: None
 
         return call
@@ -74,13 +76,12 @@ def run():
     main.eel = headless_eel
 
     settings = {
-        "aiModel": str((PROJECT_DIR / "yolov8n.pt").resolve()),
+        "aiModel": "yolov8n.pt",
         "trackerMode": "bytetrack",
         "confThresh": 0.90,
-        "captureMode": "雙格蒐證模式 (起點+最清晰)",
         "classes": {"0": True, "1": True, "2": True, "3": True, "5": True, "7": True},
-        "fastMode": True,
-        "filterStationary": True,
+        "executionMode": "headless",
+        "burnAnnotations": False,
         "skipSec": 5.0,
         "singleFolder": True,
     }
@@ -97,23 +98,19 @@ def run():
         monitor_stop.set()
         monitor.join(timeout=3)
 
-    reports = list(output_root.rglob("系統鑑識紀錄.txt"))
-    if len(reports) != 1:
-        raise RuntimeError(f"預期一份鑑識紀錄，實際為 {len(reports)} 份")
-    report_text = reports[0].read_text(encoding="utf-8")
-    completed = [video.name for video in videos if f"完成 {video.name}" in report_text]
-    sha_records = report_text.count("SHA-256:")
+    summary_args = headless_eel.last_args.get("processingFinished", ())
+    summary = summary_args[0] if summary_args else {}
     screenshots = list(output_root.rglob("*.jpg"))
+    forbidden_outputs = list(output_root.rglob("*.jsonl")) + list(output_root.rglob("*鑑識紀錄*.txt"))
 
     result = {
         "run_id": run_id,
-        "status": "passed" if len(completed) == 4 and sha_records == 4 else "failed",
+        "status": "passed" if summary.get("errors", 1) == 0 and not forbidden_outputs else "failed",
         "settings": settings,
         "videos": [{"name": video.name, "size": video.stat().st_size} for video in videos],
-        "completed_videos": completed,
-        "sha256_record_count": sha_records,
         "screenshot_count": len(screenshots),
-        "report_path": str(reports[0]),
+        "summary": summary,
+        "forbidden_output_count": len(forbidden_outputs),
         "ui_event_counts": headless_eel.counts,
         **metrics,
     }

@@ -20,6 +20,20 @@ import main
 
 
 class ForensicCoreTests(unittest.TestCase):
+    def test_product_branding_uses_smart_video_screening_identity(self):
+        html = (PROJECT_DIR / "web" / "index.html").read_text(encoding="utf-8")
+        readme = (PROJECT_DIR / "README.md").read_text(encoding="utf-8")
+        run_script = (PROJECT_DIR / "RUN.bat").read_text(encoding="utf-8")
+        favicon = (PROJECT_DIR / "web" / "favicon.svg").read_text(encoding="utf-8")
+
+        self.assertIn("AG-MONITOR 智慧影像快篩系統", html)
+        self.assertIn("AG-MONITOR-Smart-Video-Screening", readme)
+        self.assertIn("AG-MONITOR Smart Video Screening", run_script)
+        self.assertIn('href="favicon.svg"', html)
+        self.assertIn("智慧影像快篩系統", favicon)
+        for retired_label in ("AG-Forensic-Player", "科技偵查戰術播放器", "智慧雙軌鑑識系統"):
+            self.assertNotIn(retired_label, html)
+
     def test_tracker_config_uses_project_allowlist(self):
         mode, config_path = main.resolve_tracker_config({"trackerMode": "botsort_reid"})
         self.assertEqual(mode, "botsort_reid")
@@ -41,158 +55,60 @@ class ForensicCoreTests(unittest.TestCase):
         html = (PROJECT_DIR / "web" / "index.html").read_text(encoding="utf-8")
         self.assertIn('id="trackerMode"', html)
         self.assertIn("trackerMode: document.getElementById(\"trackerMode\").value", html)
-        self.assertIn('document.getElementById("trackerMode").disabled = true', html)
+        self.assertIn("setProcessingControls(true)", html)
+        self.assertIn("#trackerMode", html)
 
-    def test_sr_download_failure_uses_opencv_fallback(self):
-        completed = threading.Event()
-        callback_result = {}
-
-        class Receiver:
-            def on_super_res_finished(self, encoded_image, warning):
-                callback_result.update(image=encoded_image, warning=warning)
-                completed.set()
-                return lambda: None
-
-        source = np.full((8, 12, 3), 127, dtype=np.uint8)
-        ok, encoded = cv2.imencode(".png", source)
-        self.assertTrue(ok)
-        payload = base64.b64encode(encoded).decode("ascii")
-
-        with patch.object(main, "eel", Receiver()), patch.object(
-            main, "check_and_download_sr_model", return_value=False
-        ):
-            main.run_ai_super_resolution(payload, mode="plate")
-            self.assertTrue(completed.wait(10), "OpenCV 備援流程未在期限內完成")
-
-        self.assertIsNotNone(callback_result["image"])
-        self.assertIn("備援", callback_result["warning"])
-
-    def test_sr_invokes_ncnn_with_engine_working_directory(self):
-        completed = threading.Event()
-        callback_result = {}
-        process_call = {}
-
-        class Receiver:
-            def on_super_res_finished(self, encoded_image, warning):
-                callback_result.update(image=encoded_image, warning=warning)
-                completed.set()
-                return lambda: None
-
-        class SuccessfulProcess:
-            returncode = 0
-
-            def __init__(self, command, **kwargs):
-                process_call.update(command=command, kwargs=kwargs)
-                image = cv2.imread(command[2])
-                cv2.imwrite(command[4], image)
-
-            def poll(self):
-                return self.returncode
-
-        source = np.full((8, 12, 3), 200, dtype=np.uint8)
-        ok, encoded = cv2.imencode(".png", source)
-        self.assertTrue(ok)
-        payload = base64.b64encode(encoded).decode("ascii")
-
-        with patch.object(main, "eel", Receiver()), patch.object(
-            main, "check_and_download_sr_model", return_value=True
-        ), patch.object(main.subprocess, "Popen", SuccessfulProcess):
-            main.run_ai_super_resolution(payload, mode="plate")
-            self.assertTrue(completed.wait(10), "NCNN 模擬流程未在期限內完成")
-
-        self.assertEqual(process_call["kwargs"]["cwd"], main.NCNN_MODEL_DIR)
-        self.assertEqual(process_call["command"][-1], "realesrgan-x4plus")
-        self.assertIsNotNone(callback_result["image"])
-        self.assertIsNone(callback_result["warning"])
-
-    def test_sr_cancel_terminates_running_ncnn(self):
-        started = threading.Event()
-        terminated = threading.Event()
-
-        class Receiver:
-            def on_super_res_finished(self, *_args):
-                return lambda: None
-
-        class RunningProcess:
-            returncode = None
-
-            def __init__(self, *_args, **_kwargs):
-                started.set()
-
-            def poll(self):
-                return self.returncode
-
-            def terminate(self):
-                self.returncode = -15
-                terminated.set()
-
-            def wait(self, timeout=None):
-                return self.returncode
-
-            def kill(self):
-                self.returncode = -9
-                terminated.set()
-
-        source = np.full((8, 12, 3), 64, dtype=np.uint8)
-        ok, encoded = cv2.imencode(".png", source)
-        self.assertTrue(ok)
-        payload = base64.b64encode(encoded).decode("ascii")
-
-        with patch.object(main, "eel", Receiver()), patch.object(
-            main, "check_and_download_sr_model", return_value=True
-        ), patch.object(main.subprocess, "Popen", RunningProcess):
-            main.run_ai_super_resolution(payload, mode="face")
-            self.assertTrue(started.wait(10), "NCNN 模擬程序未啟動")
-            main.abort_ai_super_resolution()
-            self.assertTrue(terminated.wait(10), "取消後未終止 NCNN 程序")
-        main.sr_abort_flag = False
-
-    def test_sr_zip_rejects_hash_mismatch_and_path_traversal(self):
-        with tempfile.TemporaryDirectory(dir=PROJECT_DIR) as temp_dir:
-            temp_path = Path(temp_dir)
-            bad_hash_zip = temp_path / "bad-hash.zip"
-            with zipfile.ZipFile(bad_hash_zip, "w") as archive:
-                archive.writestr("placeholder.txt", "x")
-            with self.assertRaisesRegex(ValueError, "SHA-256"):
-                main.install_sr_engine_from_zip(
-                    str(bad_hash_zip), str(temp_path / "engine"), expected_sha256="0" * 64
-                )
-
-            unsafe_zip = temp_path / "unsafe.zip"
-            with zipfile.ZipFile(unsafe_zip, "w") as archive:
-                archive.writestr("../escape.txt", "x")
-            unsafe_hash = hashlib.sha256(unsafe_zip.read_bytes()).hexdigest().upper()
-            with self.assertRaisesRegex(ValueError, "不安全路徑"):
-                main.install_sr_engine_from_zip(
-                    str(unsafe_zip), str(temp_path / "engine"), expected_sha256=unsafe_hash
-                )
-            self.assertFalse((temp_path / "escape.txt").exists())
-
-    def test_sr_zip_installs_complete_engine_and_preserves_hash(self):
-        with tempfile.TemporaryDirectory(dir=PROJECT_DIR) as temp_dir:
-            temp_path = Path(temp_dir)
-            archive_path = temp_path / "realesrgan.zip"
-            with zipfile.ZipFile(archive_path, "w") as archive:
-                for relative_path in main.NCNN_REQUIRED_FILES:
-                    archive.writestr(f"release/{relative_path}", relative_path.encode("utf-8"))
-            expected_hash = hashlib.sha256(archive_path.read_bytes()).hexdigest().upper()
-            expected_exe_hash = hashlib.sha256(b"realesrgan-ncnn-vulkan.exe").hexdigest().upper()
-            engine_dir = temp_path / "engine"
-
-            actual_hash = main.install_sr_engine_from_zip(
-                str(archive_path),
-                str(engine_dir),
-                expected_sha256=expected_hash,
-                expected_exe_sha256=expected_exe_hash,
-            )
-
-            self.assertEqual(actual_hash, expected_hash)
-            self.assertTrue(main.validate_sr_engine(str(engine_dir), expected_exe_hash))
+    def test_model_allowlist_accepts_supported_names_and_rejects_paths(self):
+        self.assertEqual(main.resolve_model_name({"aiModel": "yolo11n.pt"}), "yolo11n.pt")
+        self.assertEqual(main.resolve_model_name({"aiModel": "yolo12s.pt"}), "yolo12s.pt")
+        with self.assertRaisesRegex(ValueError, "不支援的 AI 模型"):
+            main.resolve_model_name({"aiModel": "custom.pt"})
 
     def test_watchdog_ignores_queue_backpressure_and_detects_decode_stall(self):
         self.assertFalse(main.should_trigger_decoder_deadlock("queue_wait", 120.0, timeout=30.0))
         self.assertFalse(main.should_trigger_decoder_deadlock("decoding", 29.9, timeout=30.0))
         self.assertTrue(main.should_trigger_decoder_deadlock("decoding", 30.0, timeout=30.0))
+
+    def test_manual_mode_caches_paused_frame_instead_of_draining_decoder(self):
+        source = (PROJECT_DIR / "main.py").read_text(encoding="utf-8")
+        self.assertIn("current_frame_cache = frame", source)
+        self.assertIn("frame = current_frame_cache", source)
+        self.assertNotIn("current_av_frame", source)
+
+    def test_raw_stream_skip_builds_current_timecode_before_preview(self):
+        source = (PROJECT_DIR / "main.py").read_text(encoding="utf-8")
+        raw_skip_block = source.split("if raw_skip_counter < static_skip_step:", 1)[1].split("else:", 1)[0]
+        self.assertLess(raw_skip_block.index("t_str = format_timecode"), raw_skip_block.index("push_frame_to_ui"))
+        self.assertIn("real_roi_poly, t_str", raw_skip_block)
+
+    def test_unconfirmed_tracker_box_cannot_create_scene_event(self):
+        source = (PROJECT_DIR / "main.py").read_text(encoding="utf-8")
+        event_block = source.split("new_scene_targets = []", 1)[1].split("if new_scene_targets:", 1)[0]
+        self.assertIn("if not target.get('track_confirmed', False):", event_block)
+
+    def test_tracker_generation_reset_clears_old_id_state(self):
+        source = (PROJECT_DIR / "main.py").read_text(encoding="utf-8")
+        reset_block = source.split("# 重置 YOLO 追蹤器時會從頭分配 Track ID", 1)[1].split("continue", 1)[0]
+        self.assertIn("track_states.clear()", reset_block)
+        self.assertIn("id_alias_map.clear()", reset_block)
+        self.assertLess(reset_block.index("track_states.clear()"), reset_block.index("model.predictor = None"))
+
+    def test_player_one_shot_commands_increment_revisions(self):
+        state = {
+            "seek_req": None, "seek_revision": 0,
+            "step_req": 0, "step_revision": 0,
+            "manual_capture_req": False, "manual_capture_revision": 0,
+            "playing": False, "reverse": False, "speed": 1.0,
+        }
+        with patch.object(main, "player_state", state), \
+             patch.object(main.eel, "updatePlayState", create=True):
+            main.seek_frame(25)
+            main.step_frame(1)
+            main.manual_capture()
+
+        self.assertEqual(state["seek_revision"], 1)
+        self.assertEqual(state["step_revision"], 1)
+        self.assertEqual(state["manual_capture_revision"], 1)
 
     def test_safe_rename_records_hash_and_resolves_collision(self):
         payload = b"forensic-video"
@@ -265,35 +181,29 @@ class ForensicCoreTests(unittest.TestCase):
 
     def test_frontend_sends_all_live_processing_settings(self):
         html = (PROJECT_DIR / "web" / "index.html").read_text(encoding="utf-8")
-        for setting_name in ("confThresh", "fastMode", "skipSec", "classes", "captureMode", "filterStationary"):
+        for setting_name in ("confThresh", "skipSec", "classes", "inferenceSize", "riderAssist"):
             self.assertIn(f"update_live_setting('{setting_name}'", html)
+        self.assertIn("executionMode: executionMode", html)
+        self.assertIn("burnAnnotations: document.getElementById", html)
+        self.assertNotIn('id="filterStationary"', html)
 
     def test_live_settings_override_all_supported_fields(self):
         current = {
             "confThresh": 0.40,
-            "fastMode": True,
             "skipSec": 0.2,
             "classes": {"0": True, "2": True},
-            "captureMode": "舊模式",
-            "filterStationary": True,
         }
         live = {
             "confThresh": 0.65,
-            "fastMode": False,
             "skipSec": "1.5",
             "classes": {"0": False, "2": True},
-            "captureMode": "事件起訖模式",
-            "filterStationary": False,
         }
 
         resolved = main.resolve_live_processing_settings(live, current)
 
         self.assertEqual(resolved["confThresh"], 0.65)
-        self.assertFalse(resolved["fastMode"])
         self.assertEqual(resolved["skipSec"], 1.5)
         self.assertEqual(resolved["classes"], {"0": False, "2": True})
-        self.assertEqual(resolved["captureMode"], "事件起訖模式")
-        self.assertFalse(resolved["filterStationary"])
 
     def test_evidence_metadata_contains_exact_sha256(self):
         payload = "AG-MONITOR 鑑識雜湊測試".encode("utf-8")
@@ -307,98 +217,72 @@ class ForensicCoreTests(unittest.TestCase):
             self.assertEqual(metadata["size"], len(payload))
             self.assertEqual(metadata["sha256"], hashlib.sha256(payload).hexdigest().upper())
 
-    def test_capture_modes_flush_expected_evidence(self):
-        base_state = {
-            "is_moving": True,
-            "best_frame": Mock(),
-            "best_timecode": "00:00:01.000",
-            "best_summary": ["ID:1 car"],
-            "best_target_info": {},
-            "last_frame": Mock(),
-            "last_timecode": "00:00:02.000",
-            "last_target_info": {},
-            "class_name": "car",
-        }
-
-        with patch.object(main, "save_legal_screenshot") as save_mock, patch.object(main, "eel", Mock()):
-            states = {1: base_state.copy()}
-            main._flush_all_track_states(states, "雙格蒐證模式 (起點+最清晰)", "out", "video")
-            self.assertEqual(save_mock.call_count, 1)
-
-            save_mock.reset_mock()
-            states = {1: base_state.copy()}
-            main._flush_all_track_states(states, "事件起訖模式", "out", "video")
-            self.assertEqual(save_mock.call_count, 1)
-            self.assertIn("Exit", save_mock.call_args.args[3][0])
-
-            save_mock.reset_mock()
-            states = {1: base_state.copy()}
-            main._flush_all_track_states(states, "持續追蹤模式 (預設)", "out", "video")
-            self.assertEqual(save_mock.call_count, 0)
-
-    def test_same_timecode_captures_never_overwrite_existing_evidence(self):
+    def test_scene_screenshot_keeps_original_resolution_and_creates_no_manifest(self):
         source = np.full((24, 32, 3), 127, dtype=np.uint8)
-        with tempfile.TemporaryDirectory(dir=PROJECT_DIR) as temp_dir, patch.object(
-            main, "write_report"
-        ), patch.object(main, "current_report_path", str(Path(temp_dir) / "系統鑑識紀錄.txt")):
-            output_dir = Path(temp_dir) / "video"
-            first_path = main.save_legal_screenshot(
-                source.copy(), str(output_dir), "2026/03/26 17:37:28.123", ["ID:1 car"], "video"
+        original = source.copy()
+        target = {"tid": 12, "cls_id": 2, "conf": 0.88, "xyxy": (2, 3, 20, 18)}
+        with tempfile.TemporaryDirectory(dir=PROJECT_DIR) as temp_dir:
+            first_path = main.save_scene_screenshot(
+                source, temp_dir, "2026/03/26 17:35:12.123", "CH07", target, [target], False
             )
-            second_path = main.save_legal_screenshot(
-                source.copy(), str(output_dir), "2026/03/26 17:37:28.123", ["ID:2 car"], "video"
+            second_path = main.save_scene_screenshot(
+                source, temp_dir, "2026/03/26 17:35:12.123", "CH07", target, [target], False
             )
-
-            self.assertIsNotNone(first_path)
-            self.assertIsNotNone(second_path)
             self.assertNotEqual(first_path, second_path)
-            self.assertTrue(Path(first_path).is_file())
-            self.assertTrue(Path(second_path).is_file())
-            self.assertEqual(len(list(output_dir.glob("*.jpg"))), 2)
-            manifest_path = Path(temp_dir) / main.CAPTURE_MANIFEST_FILENAME
-            records = [json.loads(line) for line in manifest_path.read_text(encoding="utf-8").splitlines()]
-            self.assertEqual(len(records), 2)
-            self.assertEqual(records[0]["targets"], ["ID:1 car"])
-            self.assertEqual(records[1]["targets"], ["ID:2 car"])
-            self.assertTrue(all(record["source_prefix"] == "video" for record in records))
-            for record in records:
-                capture_path = Path(record["path"])
-                self.assertEqual(record["size"], capture_path.stat().st_size)
-                self.assertEqual(record["sha256"], hashlib.sha256(capture_path.read_bytes()).hexdigest().upper())
+            self.assertEqual(Path(first_path).name, "CH07_17h35m12s_ID12_Car.jpg")
+            saved = cv2.imread(first_path)
+            self.assertEqual(saved.shape[:2], source.shape[:2])
+            np.testing.assert_array_equal(source, original)
+            self.assertFalse(any(Path(temp_dir).glob("*.jsonl")))
+            self.assertFalse(any(Path(temp_dir).glob("*鑑識紀錄*.txt")))
 
-    def test_capture_manifest_failure_does_not_report_success(self):
-        source = np.full((24, 32, 3), 127, dtype=np.uint8)
-        with tempfile.TemporaryDirectory(dir=PROJECT_DIR) as temp_dir, patch.object(
-            main, "_append_capture_manifest", side_effect=OSError("模擬清冊寫入失敗")
-        ), patch.object(main, "write_report") as report_mock:
-            result = main.save_legal_screenshot(
-                source, temp_dir, "2026/03/26 17:37:28.123", ["ID:1 car"], "video"
+    def test_scene_screenshot_preserves_unicode_video_name(self):
+        source = np.zeros((16, 16, 3), dtype=np.uint8)
+        target = {"tid": 7, "cls_id": 2, "conf": 0.9, "xyxy": (1, 1, 10, 10)}
+        with tempfile.TemporaryDirectory(dir=PROJECT_DIR) as temp_dir:
+            output_path = main.save_scene_screenshot(
+                source, temp_dir, "00:01:02", "路口東側_CH07", target, [target], False
             )
 
-        self.assertIsNone(result)
-        self.assertTrue(any("清冊寫入失敗" in call.args[0] for call in report_mock.call_args_list))
+            self.assertEqual(Path(output_path).name, "路口東側_CH07_00h01m02s_ID7_Car.jpg")
 
-    def test_capture_write_failure_is_not_reported_as_success(self):
-        state = {
-            "is_moving": True,
-            "best_frame": Mock(),
-            "best_timecode": "00:00:01.000",
-            "best_summary": ["ID:1 car"],
-            "best_target_info": {},
-            "last_frame": Mock(),
-            "last_timecode": "00:00:02.000",
-            "last_target_info": {},
-            "class_name": "car",
-        }
-        receiver = Mock()
-        with patch.object(main, "save_legal_screenshot", return_value=None), patch.object(main, "eel", receiver):
-            main._flush_all_track_states(
-                {1: state}, "雙格蒐證模式 (起點+最清晰)", "out", "video"
-            )
+    def test_annotation_output_uses_copy_and_draws_all_targets(self):
+        source = np.zeros((80, 120, 3), dtype=np.uint8)
+        original = source.copy()
+        targets = [
+            {"tid": 1, "cls_id": 2, "conf": 0.91, "xyxy": (5, 10, 45, 55)},
+            {"tid": 2, "cls_id": 0, "conf": 0.82, "xyxy": (60, 15, 90, 70)},
+        ]
+        annotated = main.draw_scene_annotations(source, targets)
+        np.testing.assert_array_equal(source, original)
+        self.assertFalse(np.array_equal(annotated, source))
 
-        receiver.appendLog.assert_called_once()
-        self.assertEqual(receiver.appendLog.call_args.args[1], "error")
-        self.assertIn("失敗", receiver.appendLog.call_args.args[0])
+    def test_capture_writer_flushes_all_queued_scenes(self):
+        source = np.full((24, 32, 3), 80, dtype=np.uint8)
+        target = {"tid": 3, "cls_id": 3, "conf": 0.8, "xyxy": (2, 2, 20, 20)}
+        with tempfile.TemporaryDirectory(dir=PROJECT_DIR) as temp_dir:
+            writer = main.CaptureWriter(maxsize=2)
+            for second in range(3):
+                self.assertTrue(writer.enqueue(source, temp_dir, f"00:00:0{second}", "cam", target, [target]))
+            stats = writer.finish(flush=True)
+            self.assertEqual(stats["events"], 3)
+            self.assertEqual(stats["written"], 3)
+            self.assertEqual(stats["discarded"], 0)
+            self.assertEqual(len(list(Path(temp_dir).glob("*.jpg"))), 3)
+
+    def test_capture_writer_force_stop_discards_pending_items(self):
+        writer = main.CaptureWriter.__new__(main.CaptureWriter)
+        writer._queue = main.queue.Queue(maxsize=4)
+        writer._status_callback = None
+        writer._lock = threading.Lock()
+        writer._accepting = True
+        writer._stats = {"events": 3, "written": 0, "discarded": 0, "errors": 0, "queued": 0, "state": "normal"}
+        writer._thread = Mock()
+        for _ in range(3):
+            writer._queue.put({"invalid": True})
+        stats = writer.finish(flush=False)
+        self.assertEqual(stats["discarded"], 3)
+        writer._thread.join.assert_called_once()
 
     def test_safe_base64_decode_validates_input_length_and_prefix(self):
         data, err = main.safe_base64_decode("data:image/png;base64,aGVsbG8=")
@@ -431,11 +315,8 @@ class ForensicCoreTests(unittest.TestCase):
     def test_live_processing_settings_preserve_inference_options(self):
         current = {
             "confThresh": 0.45,
-            "fastMode": True,
             "skipSec": 0.2,
             "classes": {"0": True},
-            "captureMode": "",
-            "filterStationary": True,
             "inferenceSize": 640,
             "riderAssist": False,
         }
@@ -466,6 +347,56 @@ class ForensicCoreTests(unittest.TestCase):
         }
         self.assertFalse(main.record_motion_observation(distant_vehicle_state, (57.0, 50.0), (60, 30)))
         self.assertTrue(main.record_motion_observation(distant_vehicle_state, (58.0, 50.0), (60, 30)))
+
+    def test_motion_guide_requires_area_and_two_consecutive_frames(self):
+        detector = main.MotionGuideDetector(min_area=500, confirmation_frames=2)
+        base = np.zeros((100, 100, 3), dtype=np.uint8)
+        moved_one = base.copy()
+        moved_one[10:40, 10:40] = 255
+        moved_two = base.copy()
+        moved_two[20:50, 20:50] = 255
+        self.assertFalse(detector.observe(base))
+        self.assertFalse(detector.observe(moved_one))
+        self.assertTrue(detector.observe(moved_two))
+
+        tiny_detector = main.MotionGuideDetector(min_area=500, confirmation_frames=2)
+        tiny = base.copy()
+        tiny[2:12, 2:12] = 255
+        self.assertFalse(tiny_detector.observe(base))
+        self.assertFalse(tiny_detector.observe(tiny))
+
+    def test_frontend_exposes_headless_writer_and_force_stop_controls(self):
+        html = (PROJECT_DIR / "web" / "index.html").read_text(encoding="utf-8")
+        for expected in ('value="headless"', 'id="burnAnnotations"', 'id="writerStatus"', 'id="btnForceStop"'):
+            self.assertIn(expected, html)
+        self.assertIn("eel.request_force_stop()", html)
+        self.assertIn("eel.expose(updateWriterStatus)", html)
+        self.assertIn("後端連線或啟動失敗", html)
+        self.assertIn("<strong>啟動失敗</strong>", html)
+
+    def test_start_processing_rejects_duplicate_task(self):
+        with patch.object(main, "is_processing", True), \
+             patch.object(main.eel, "updateStatus", create=True) as update_status:
+            result = main.start_processing({})
+
+        self.assertFalse(result["success"])
+        self.assertIn("已有分析任務", result["msg"])
+        update_status.assert_called_once()
+
+    def test_start_processing_recovers_when_worker_thread_cannot_start(self):
+        settings = {"aiModel": "yolov8n.pt", "inferenceSize": 960, "trackerMode": "bytetrack"}
+        with patch.object(main, "video_queue", ["sample.mp4"]), \
+             patch.object(main, "is_processing", False), \
+             patch.object(main, "resolve_model_name", return_value="yolov8n.pt"), \
+             patch.object(main, "resolve_tracker_config", return_value=("bytetrack", "tracker.yaml")), \
+             patch.object(main, "Thread") as worker_thread, \
+             patch.object(main.eel, "updateStatus", create=True):
+            worker_thread.return_value.start.side_effect = RuntimeError("thread unavailable")
+            result = main.start_processing(settings)
+
+            self.assertFalse(result["success"])
+            self.assertFalse(main.is_processing)
+            self.assertIn("無法啟動", result["msg"])
 
     def test_add_dropped_paths_files_and_directories(self):
         with tempfile.TemporaryDirectory() as temp_dir:

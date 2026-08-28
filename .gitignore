@@ -10,16 +10,7 @@ python_embed/
 *.pt
 *.pb
 yolov8n.pt
-ESPCN_x2.pb
 
-# Real-ESRGAN 可下載執行資產（由程式驗證後安裝，不納入版本庫）
-realesrgan*.zip
-models/realesrgan/
-models/.realesrgan-staging-*/
-models/realesrgan.previous/
-
-# 實體測試影片與證物資料夾 (切斷數據外洩)
+# 實體測試影片與輸出資料夾（避免大型資料進入版本庫）
 input_videos/
 captures/
-repaired_videos/
-enhanced_evidence/
