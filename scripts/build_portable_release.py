@@ -133,8 +133,15 @@ def assert_release_paths() -> None:
 
 
 def git_output(*args: str) -> str:
+    # Codex 工作區或由不同 Windows 帳號執行中央建置時，Repository
+    # 擁有者可能與目前帳號不同。只對本專案單次放行，不修改全域 Git 設定。
+    safe_directory = PROJECT_ROOT.as_posix()
     result = subprocess.run(
-        ["git", *args], cwd=PROJECT_ROOT, check=True, capture_output=True, text=True
+        ["git", "-c", f"safe.directory={safe_directory}", *args],
+        cwd=PROJECT_ROOT,
+        check=True,
+        capture_output=True,
+        text=True,
     )
     return result.stdout.strip()
 
