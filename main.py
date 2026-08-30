@@ -9,14 +9,8 @@ os.environ["YOLO_VERBOSE"] = "False"
 os.environ["YOLO_OFFLINE"] = "True"
 # 將 Ultralytics 執行設定留在專案的忽略目錄內，避免可攜模式
 # 依賴或污染目前 Windows 使用者的 AppData 設定。
-os.environ.setdefault(
-    "YOLO_CONFIG_DIR",
-    os.path.join(_CAPTURES_DIR, ".ultralytics"),
-)
-os.environ.setdefault(
-    "MPLCONFIGDIR",
-    os.path.join(_CAPTURES_DIR, ".matplotlib"),
-)
+os.environ["YOLO_CONFIG_DIR"] = os.path.join(_CAPTURES_DIR, ".ultralytics")
+os.environ["MPLCONFIGDIR"] = os.path.join(_CAPTURES_DIR, ".matplotlib")
 os.makedirs(os.environ["YOLO_CONFIG_DIR"], exist_ok=True)
 os.makedirs(os.environ["MPLCONFIGDIR"], exist_ok=True)
 os.makedirs(_LOGS_DIR, exist_ok=True)
@@ -31,6 +25,7 @@ import math
 import queue
 import re
 import subprocess
+import urllib.request
 from datetime import datetime, timedelta
 import threading
 from threading import Thread
@@ -64,6 +59,12 @@ try:
 except Exception:
     pass
 dlog("=== main.py 啟動 ===")
+
+def diagnostic_log(message):
+    """同時輸出 CMD 與偵錯檔，讓啟動、匯入與分析失敗可直接追查。"""
+    formatted = f"[AG-MONITOR] {message}"
+    print(formatted, flush=True)
+    dlog(formatted)
 
 def safe_base64_decode(base64_str, max_bytes=50 * 1024 * 1024):
     """安全解析 Base64 數據，防禦過長字串 OOM、data-URI 前綴與格式毀損。"""
@@ -120,6 +121,15 @@ class CONFIG:
     }
 
     TARGET_CLASSES = {0: "person", 1: "bicycle", 2: "car", 3: "motorcycle", 5: "bus", 7: "truck"}
+
+MODEL_ASSETS = {
+    "yolov8n.pt": {"sha256": "F59B3D833E2FF32E194B5BB8E08D211DC7C5BDF144B90D2C8412C47CCFC83B36", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolov8n.pt"},
+    "yolo11n.pt": {"sha256": "0EBBC80D4A7680D14987A577CD21342B65ECFD94632BD9A8DA63AE6417644EE1", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt"},
+    "yolo11s.pt": {"sha256": "85A76FE86DD8AFE384648546B56A7A78580C7CB7B404FC595F97969322D502D5", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt"},
+    "yolo12n.pt": {"sha256": "419FF3DCA37D69BACC93A50FA0C186A1C6F9FE62FAE0F108B0872829689E9CA6", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo12n.pt"},
+    "yolo12s.pt": {"sha256": "E915C2C4286E3F6F8610EF106FA3F94A7B8C19B30ECCEDE5887E22C33EF75F58", "url": "https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo12s.pt"},
+}
+model_download_lock = threading.Lock()
 
 # Global State
 video_queue = []
@@ -179,13 +189,66 @@ def resolve_tracker_config(settings):
 
 def resolve_model_name(settings, require_file=False):
     """只允許載入明確支援的本機模型權重，避免任意路徑注入。"""
-    model_name = os.path.basename(str(settings.get("aiModel", "yolo11n.pt")))
+    model_name = os.path.basename(str(settings.get("aiModel", "yolov8n.pt")))
     if model_name not in CONFIG.MODEL_ALLOWLIST:
         raise ValueError(f"不支援的 AI 模型: {model_name}")
     model_path = os.path.join(CONFIG.BASE_DIR, model_name)
     if require_file and not os.path.isfile(model_path):
-        raise FileNotFoundError(f"找不到模型權重: {model_name}")
+        available = sorted(
+            name for name in CONFIG.MODEL_ALLOWLIST
+            if os.path.isfile(os.path.join(CONFIG.BASE_DIR, name))
+        )
+        available_text = "、".join(available) if available else "無"
+        diagnostic_log(f"模型驗證失敗：要求 {model_name}；可用本機權重：{available_text}")
+        raise FileNotFoundError(
+            f"找不到模型權重: {model_name}（可用本機權重: {available_text}）"
+        )
+    if require_file:
+        diagnostic_log(f"模型驗證通過：{model_name}")
     return model_name
+
+
+def _available_model_names():
+    return sorted(name for name in CONFIG.MODEL_ALLOWLIST if os.path.isfile(os.path.join(CONFIG.BASE_DIR, name)))
+
+
+@eel.expose
+def ensure_model_weight(model_name):
+    """下載指定白名單權重至暫存檔，雜湊驗證後才置換正式檔案。"""
+    model_name = os.path.basename(str(model_name))
+    metadata = MODEL_ASSETS.get(model_name)
+    if model_name not in CONFIG.MODEL_ALLOWLIST or metadata is None:
+        return {"success": False, "message": f"不支援自動下載的 AI 模型: {model_name}"}
+    target = os.path.join(CONFIG.BASE_DIR, model_name)
+    temporary = target + ".download"
+    with model_download_lock:
+        if os.path.isfile(target) and calculate_sha256(target) == metadata["sha256"]:
+            diagnostic_log(f"模型權重已就緒：{model_name}")
+            return {"success": True, "downloaded": False, "model": model_name}
+        try:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+            diagnostic_log(f"開始下載模型權重：{model_name}")
+            urllib.request.urlretrieve(metadata["url"], temporary)
+            actual_hash = calculate_sha256(temporary)
+            if actual_hash != metadata["sha256"]:
+                raise RuntimeError(f"SHA-256 驗證失敗：{actual_hash}")
+            os.replace(temporary, target)
+            diagnostic_log(f"模型權重下載完成並驗證：{model_name}")
+            return {"success": True, "downloaded": True, "model": model_name}
+        except Exception as error:
+            if os.path.exists(temporary):
+                os.remove(temporary)
+            diagnostic_log(f"模型權重下載失敗：{model_name}；{error}")
+            return {"success": False, "message": f"{model_name} 下載失敗：{error}"}
+
+
+@eel.expose
+def get_available_models():
+    """回傳專案根目錄已存在的白名單權重，供介面顯示可用狀態。"""
+    available = _available_model_names()
+    diagnostic_log(f"模型清單查詢：可用 {', '.join(available) if available else '無'}")
+    return available
 
 
 def tracker_occlusion_grace_seconds(tracker_mode):
@@ -493,9 +556,17 @@ $dialog = New-Object System.Windows.Forms.OpenFileDialog
 $dialog.Title = '選擇視訊檔案'
 $dialog.Multiselect = $true
 $dialog.Filter = '視訊檔案|*.mp4;*.avi;*.mkv;*.mov;*.m4v;*.h264;*.h265;*.264;*.265;*.dav;*.flv;*.ts;*.wmv|所有檔案|*.*'
-if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
+$owner = New-Object System.Windows.Forms.Form
+$owner.TopMost = $true
+$owner.ShowInTaskbar = $false
+$owner.StartPosition = 'CenterScreen'
+$owner.Size = New-Object System.Drawing.Size(1, 1)
+$owner.Opacity = 0
+$owner.Show()
+if ($dialog.ShowDialog($owner) -eq [System.Windows.Forms.DialogResult]::OK) {
     $dialog.FileNames | ForEach-Object { [Console]::Out.WriteLine($_) }
 }
+$owner.Dispose()
 '''
     return _run_windows_dialog(script)
 
@@ -527,6 +598,7 @@ if ($dialog.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) {
 @eel.expose
 def add_videos_dialog():
     global video_queue
+    diagnostic_log("開啟 Windows 原生影片選取視窗")
     files = _select_video_files()
     
     added_paths = []
@@ -539,6 +611,7 @@ def add_videos_dialog():
             if added_paths and len(video_queue) == len(added_paths):
                 # load preview for the first
                 Thread(target=load_preview_frame, args=(video_queue[0],), daemon=True).start()
+    diagnostic_log(f"原生選檔完成：新增 {len(added_paths)} 支影片")
     return added_paths
 
 @eel.expose
@@ -575,6 +648,7 @@ def add_dropped_paths(paths):
     global video_queue
     if not paths or not isinstance(paths, list):
         return []
+    diagnostic_log(f"拖曳匯入：收到 {len(paths)} 個本機路徑")
         
     valid_extensions = {
         ".mp4", ".avi", ".mkv", ".mov", ".m4v", ".h264", ".h265", ".264", ".265", ".dav", ".flv", ".ts", ".wmv",
@@ -605,6 +679,7 @@ def add_dropped_paths(paths):
         if added_paths and len(video_queue) == len(added_paths):
             Thread(target=load_preview_frame, args=(video_queue[0],), daemon=True).start()
             
+    diagnostic_log(f"拖曳匯入完成：新增 {len(added_paths)} 支影片")
     return added_paths
 
 @eel.expose
@@ -616,6 +691,15 @@ def resolve_and_add_dropped_files(file_metadata_list):
     global video_queue
     if not file_metadata_list or not isinstance(file_metadata_list, list):
         return {"success": False, "added_paths": [], "unresolved_names": []}
+
+    requested_names = [
+        str(item.get("name", "")).strip()
+        for item in file_metadata_list if isinstance(item, dict)
+    ]
+    diagnostic_log(
+        f"拖曳路徑反查：收到 {len(requested_names)} 個檔案"
+        f"（{', '.join(name for name in requested_names if name) or '未提供檔名'}）"
+    )
 
     valid_extensions = {
         ".mp4", ".avi", ".mkv", ".mov", ".m4v", ".h264", ".h265", ".264", ".265", ".dav", ".flv", ".ts", ".wmv",
@@ -683,6 +767,10 @@ def resolve_and_add_dropped_files(file_metadata_list):
         if added_paths and len(video_queue) == len(added_paths):
             Thread(target=load_preview_frame, args=(video_queue[0],), daemon=True).start()
 
+    diagnostic_log(
+        f"拖曳路徑反查完成：索引 {len(candidate_map)} 個候選檔名；"
+        f"新增 {len(added_paths)} 支，未定位 {len(unresolved_names)} 支"
+    )
     return {
         "success": len(added_paths) > 0,
         "added_paths": added_paths,
@@ -956,12 +1044,18 @@ def start_processing(settings):
         eel.updateStatus("狀態: 清單為空，無法開始", "danger")
         return {"success": False, "msg": "清單為空"}
     try:
+        requested_model = resolve_model_name(settings)
+        if not os.path.isfile(os.path.join(CONFIG.BASE_DIR, requested_model)):
+            download_result = ensure_model_weight(requested_model)
+            if not download_result["success"]:
+                raise FileNotFoundError(download_result["message"])
         resolve_model_name(settings, require_file=True)
         inference_size = int(settings.get("inferenceSize", 960))
         if inference_size not in {640, 960, 1280}:
             raise ValueError(f"不支援的推論解析度: {inference_size}")
         resolve_tracker_config(settings)
     except (ValueError, FileNotFoundError) as error:
+        diagnostic_log(f"分析啟動遭拒：{error}")
         eel.updateStatus(f"狀態: {error}", "danger")
         return {"success": False, "msg": str(error)}
     is_processing = True
@@ -985,8 +1079,13 @@ def start_processing(settings):
         Thread(target=batch_processing_worker, args=(settings,), daemon=True).start()
     except Exception as error:
         is_processing = False
+        diagnostic_log(f"分析工作執行緒無法啟動：{error}")
         eel.updateStatus(f"狀態: 分析工作無法啟動：{error}", "danger")
         return {"success": False, "msg": f"分析工作無法啟動：{error}"}
+    diagnostic_log(
+        f"分析工作已啟動：{len(video_queue)} 支影片；模型 {settings.get('aiModel', 'yolov8n.pt')}；"
+        f"模式 {settings.get('executionMode', 'manual')}"
+    )
     return {"success": True}
 
 def load_preview_frame(video_path):

@@ -58,11 +58,58 @@ class ForensicCoreTests(unittest.TestCase):
         self.assertIn("setProcessingControls(true)", html)
         self.assertIn("#trackerMode", html)
 
+    def test_frontend_defaults_to_available_weight_and_reports_drag_diagnostics(self):
+        html = (PROJECT_DIR / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("prepareDefaultModel", html)
+        self.assertIn("ensure_model_weight('yolo11n.pt')", html)
+        self.assertIn("text/uri-list", html)
+        self.assertIn("拖曳偵測：", html)
+        self.assertIn("await addVideos()", html)
+
+    def test_sidebar_and_main_panel_can_shrink_without_clipping_bottom_controls(self):
+        html = (PROJECT_DIR / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn(".main-view {", html)
+        self.assertIn(".panel-left .mode-grid { grid-template-columns: 1fr;", html)
+        self.assertGreaterEqual(html.count("min-height: 0;"), 3)
+
+    def test_windows_video_dialog_uses_topmost_owner(self):
+        source = (PROJECT_DIR / "main.py").read_text(encoding="utf-8")
+        self.assertIn("$owner.TopMost = $true", source)
+        self.assertIn("$dialog.ShowDialog($owner)", source)
+        self.assertIn("$owner.StartPosition = 'CenterScreen'", source)
+        self.assertIn("$owner.Opacity = 0", source)
+
+    def test_model_download_replaces_only_verified_temporary_file(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            model_name = "yolo11n.pt"
+            expected_data = b"verified-model"
+            expected_hash = hashlib.sha256(expected_data).hexdigest().upper()
+
+            def fake_download(_url, destination):
+                Path(destination).write_bytes(expected_data)
+
+            with patch.object(main.CONFIG, "BASE_DIR", temp_dir), \
+                 patch.object(main, "MODEL_ASSETS", {model_name: {"url": "https://example.invalid/model", "sha256": expected_hash}}), \
+                 patch.object(main.urllib.request, "urlretrieve", side_effect=fake_download):
+                result = main.ensure_model_weight(model_name)
+
+            self.assertTrue(result["success"])
+            self.assertTrue(result["downloaded"])
+            self.assertEqual(Path(temp_dir, model_name).read_bytes(), expected_data)
+            self.assertFalse(Path(temp_dir, model_name + ".download").exists())
+
     def test_model_allowlist_accepts_supported_names_and_rejects_paths(self):
         self.assertEqual(main.resolve_model_name({"aiModel": "yolo11n.pt"}), "yolo11n.pt")
         self.assertEqual(main.resolve_model_name({"aiModel": "yolo12s.pt"}), "yolo12s.pt")
         with self.assertRaisesRegex(ValueError, "不支援的 AI 模型"):
             main.resolve_model_name({"aiModel": "custom.pt"})
+
+    def test_missing_model_error_lists_available_local_weight(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            Path(temp_dir, "yolov8n.pt").write_bytes(b"test-weight")
+            with patch.object(main.CONFIG, "BASE_DIR", temp_dir):
+                with self.assertRaisesRegex(FileNotFoundError, "可用本機權重: yolov8n.pt"):
+                    main.resolve_model_name({"aiModel": "yolo11n.pt"}, require_file=True)
 
     def test_watchdog_ignores_queue_backpressure_and_detects_decode_stall(self):
         self.assertFalse(main.should_trigger_decoder_deadlock("queue_wait", 120.0, timeout=30.0))

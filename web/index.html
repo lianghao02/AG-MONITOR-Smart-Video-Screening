@@ -165,7 +165,7 @@
         .main-view {
             display: none;
             flex-grow: 1;
-            height: calc(100vh - 44px);
+            min-height: 0;
             overflow: hidden;
             position: relative;
         }
@@ -182,6 +182,7 @@
             display: flex;
             flex-direction: column;
             overflow-y: auto;
+            min-height: 0;
             flex-shrink: 0;
             gap: 12px;
             padding: 12px;
@@ -510,6 +511,7 @@
             background-color: var(--morandi-bg-app);
             position: relative;
             overflow: hidden;
+            min-height: 0;
         }
 
         /* 雙模態切換膠囊 (Segmented Mode Switcher) */
@@ -556,6 +558,7 @@
         .canvas-wrapper {
             flex-grow: 1;
             display: flex;
+            min-height: 0;
             align-items: center;
             justify-content: center;
             background: #181C22;
@@ -820,10 +823,14 @@
         .mode-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-bottom: 10px; }
         .mode-option { position: relative; display: block; cursor: pointer; }
         .mode-option input { position: absolute; opacity: 0; pointer-events: none; }
-        .mode-option-content { min-height: 64px; padding: 9px; border: 1px solid var(--morandi-border); border-radius: var(--radius-sm); background: #fff; transition: 0.15s ease; }
+        .mode-option-content { display: block; width: 100%; min-height: 64px; padding: 9px; border: 1px solid var(--morandi-border); border-radius: var(--radius-sm); background: #fff; transition: 0.15s ease; }
         .mode-option-content strong { display: block; color: var(--text-primary); font-size: 12px; margin-bottom: 3px; }
         .mode-option-content small { color: var(--text-secondary); font-size: 10.5px; line-height: 1.35; }
         .mode-option input:checked + .mode-option-content { border-color: var(--morandi-sage); background: var(--morandi-sage-soft); box-shadow: 0 0 0 1px var(--morandi-sage); }
+        .panel-left .mode-grid { grid-template-columns: 1fr; gap: 6px; }
+        .panel-left .mode-option-content { min-height: 0; padding: 8px 10px; }
+        .panel-left .mode-option-content strong { display: inline; margin: 0; }
+        .panel-left .mode-option-content small { display: inline; margin-left: 6px; }
         .writer-status { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; padding: 8px 14px; border-bottom: 1px solid var(--morandi-border-light); background: #fff; }
         .writer-stat { text-align: center; padding: 5px; border-radius: var(--radius-sm); background: var(--morandi-bg-subtle); font-size: 10px; color: var(--text-secondary); }
         .writer-stat strong { display: block; margin-top: 2px; color: var(--text-primary); font-size: 13px; }
@@ -899,12 +906,12 @@
                     <div style="margin-bottom: 10px;">
                     <label class="form-label">辨識模型：</label>
                     <select id="aiModel" class="morandi-select" style="margin-bottom: 8px;">
-                        <option value="yolov8n.pt">YOLOv8n（相容回退）</option>
-                        <option value="yolov8s.pt">YOLOv8s（現有相容回退）</option>
-                        <option value="yolo11n.pt" selected>YOLO11n（CPU 輕量／預設）</option>
-                        <option value="yolo11s.pt">YOLO11s（精度平衡）</option>
-                        <option value="yolo12n.pt">YOLO12n（Area Attention 輕量）</option>
-                        <option value="yolo12s.pt">YOLO12s（Area Attention 小目標）</option>
+                        <option value="yolov8n.pt" data-label="YOLOv8n">YOLOv8n（檢查中）</option>
+                        <option value="yolov8s.pt" data-label="YOLOv8s">YOLOv8s（檢查中）</option>
+                        <option value="yolo11n.pt" data-label="YOLO11n" selected>YOLO11n（檢查中）</option>
+                        <option value="yolo11s.pt" data-label="YOLO11s">YOLO11s（檢查中）</option>
+                        <option value="yolo12n.pt" data-label="YOLO12n">YOLO12n（檢查中）</option>
+                        <option value="yolo12s.pt" data-label="YOLO12s">YOLO12s（檢查中）</option>
                     </select>
                     
                     <label class="form-label">追蹤與去重方式：</label>
@@ -1219,6 +1226,31 @@
             skipSecSlider.oninput();
             document.getElementById('presetHint').textContent = '目前：' + preset.hint;
         }
+
+        async function refreshModelAvailability() {
+            const modelSelector = document.getElementById('aiModel');
+            try {
+                const availableSet = new Set(await eel.get_available_models()());
+                [...modelSelector.options].forEach(option => {
+                    option.textContent = `${option.dataset.label}（${availableSet.has(option.value) ? '已安裝' : '開始分析時自動下載'}）`;
+                });
+            } catch(error) {
+                console.error('模型權重狀態查詢失敗', error);
+                appendLog(`無法確認模型權重：${error.message || error}`, 'warn');
+            }
+        }
+
+        async function prepareDefaultModel() {
+            appendLog('正在檢查預設 YOLO11n 權重…', 'info');
+            const result = await eel.ensure_model_weight('yolo11n.pt')();
+            if(result && result.success) {
+                appendLog(result.downloaded ? 'YOLO11n 已下載並完成雜湊驗證。' : 'YOLO11n 權重已就緒。', 'success');
+            } else {
+                appendLog(`YOLO11n 無法自動下載：${result && result.message ? result.message : '未知錯誤'}；可改用已安裝模型。`, 'warn');
+                if(document.getElementById('aiModel').value === 'yolo11n.pt') document.getElementById('aiModel').value = 'yolov8n.pt';
+            }
+            await refreshModelAvailability();
+        }
         
         function toggleQueueDrawer() {
             let drawer = document.getElementById("queueDrawer");
@@ -1346,11 +1378,19 @@
         }
 
         async function addVideos() {
-            if(isProcessing) return;
-            let paths = await eel.add_videos_dialog()();
-            if(paths && paths.length > 0) {
-                populateQueueList(paths);
-                appendLog(`已匯入 ${paths.length} 個視訊檔案`, "success");
+            if(isProcessing || isImporting) return [];
+            isImporting = true;
+            try {
+                let paths = await eel.add_videos_dialog()();
+                if(paths && paths.length > 0) {
+                    populateQueueList(paths);
+                    appendLog(`已匯入 ${paths.length} 個視訊檔案`, "success");
+                } else {
+                    appendLog('未選擇影片，未變更清單。', 'info');
+                }
+                return paths || [];
+            } finally {
+                isImporting = false;
             }
         }
 
@@ -1360,6 +1400,7 @@
         const playerCanvasWrap = document.getElementById('playerCanvasWrap');
         const dragOverlay = document.getElementById('dragDropOverlay');
         let dragCounter = 0;
+        let isImporting = false;
 
         window.addEventListener('dragenter', function(e) {
             e.preventDefault();
@@ -1395,6 +1436,10 @@
                 appendLog("分析進行中，請先停止任務後再拖曳匯入新檔案", "warn");
                 return;
             }
+            if(isImporting) {
+                appendLog("已開啟選檔視窗，請先完成或取消目前匯入。", "info");
+                return;
+            }
 
             const files = e.dataTransfer.files;
             if(files && files.length > 0) {
@@ -1410,25 +1455,49 @@
                     });
                 }
 
-                if(droppedPaths.length > 0) {
-                    let added = await eel.add_dropped_paths(droppedPaths)();
+                // 部分 Chromium／WebView 不提供 File.path，但檔案總管有時會提供 file URI。
+                const uriList = e.dataTransfer.getData('text/uri-list');
+                if(uriList) {
+                    uriList.split(/\r?\n/).forEach(uri => {
+                        if(!uri || uri.startsWith('#') || !uri.toLowerCase().startsWith('file:')) return;
+                        try {
+                            let path = decodeURIComponent(new URL(uri).pathname);
+                            path = path.replace(/^\/([A-Za-z]:)/, '$1').replace(/\//g, '\\');
+                            if(path) droppedPaths.push(path);
+                        } catch(error) {
+                            console.warn('無法解析拖曳檔案 URI', error);
+                        }
+                    });
+                }
+                droppedPaths = [...new Set(droppedPaths)];
+                appendLog(`拖曳偵測：${files.length} 個檔案，取得 ${droppedPaths.length} 個本機路徑。`, 'info');
+
+                try {
+                    if(droppedPaths.length > 0) {
+                        let added = await eel.add_dropped_paths(droppedPaths)();
                     if(added && added.length > 0) {
                         populateQueueList(added);
                         appendLog(`🎯 拖曳匯入成功！已新增 ${added.length} 支影片至清單`, "success");
                     } else {
                         appendLog("拖曳之檔案已存在於清單或非支援之視訊格式", "warn");
                     }
-                } else {
-                    // 啟用智慧反查解析器 (Smart Path Resolver)
-                    let res = await eel.resolve_and_add_dropped_files(fileMetadataList)();
+                    } else {
+                        appendLog('此 WebView 未提供拖曳檔案路徑，正在依檔名與大小定位…', 'info');
+                        let res = await eel.resolve_and_add_dropped_files(fileMetadataList)();
                     if(res && res.success && res.added_paths.length > 0) {
                         populateQueueList(res.added_paths);
                         appendLog(`🎯 智慧拖曳成功！已自動定位並匯入 ${res.added_paths.length} 支影片`, "success");
                     } else {
-                        appendLog("未在專案或常用路徑中搜尋到該檔案，正在開啟定位對話框...", "info");
-                        addVideos();
+                        appendLog("找不到本機路徑；正在開啟 Windows 選檔視窗，請選取剛才的影片。", "info");
+                        await addVideos();
                     }
+                    }
+                } catch(error) {
+                    console.error('拖曳匯入失敗', error);
+                    appendLog(`拖曳匯入失敗：${error.message || error}`, 'error');
                 }
+            } else {
+                appendLog('拖曳資料未包含檔案，請改用「匯入影片」選取。', 'warn');
             }
         });
 
@@ -1798,6 +1867,10 @@
                     eel.manual_capture()();
                 }
             }
+        });
+
+        window.addEventListener('load', function() {
+            prepareDefaultModel();
         });
 
     </script>
