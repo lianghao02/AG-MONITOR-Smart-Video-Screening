@@ -225,7 +225,7 @@ def copy_runtime() -> Path:
             ignored.update(names)
         return ignored
 
-    shutil.copytree(source, target, ignore=ignore_runtime)
+    shutil.copytree(source, target, ignore=ignore_runtime, dirs_exist_ok=True)
     copy_flattened_runtime_licenses(source, CURRENT_DIR / "runtime-licenses")
     return target / "python.exe"
 
@@ -434,6 +434,24 @@ def create_archive() -> None:
     print(f"[OK] SHA-256：{digest}")
 
 
+
+def safe_rmtree(path: Path) -> None:
+    if not path.exists():
+        return
+    import stat
+    def on_error(func, p, _):
+        try:
+            os.chmod(p, stat.S_IWRITE)
+            func(p)
+        except Exception:
+            pass
+    try:
+        subprocess.run(f'cmd /c "rmdir /s /q \"{path}\""', shell=True, check=False)
+    except Exception:
+        pass
+    if path.exists():
+        shutil.rmtree(path, onerror=on_error)
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--download-models", action="store_true")
@@ -446,7 +464,7 @@ def main() -> int:
     if args.download_models:
         download_models()
     if RELEASE_DIR.exists():
-        shutil.rmtree(RELEASE_DIR)
+        safe_rmtree(RELEASE_DIR)
     DIST_ROOT.mkdir(parents=True, exist_ok=True)
     CURRENT_DIR.mkdir(parents=True, exist_ok=True)
 
