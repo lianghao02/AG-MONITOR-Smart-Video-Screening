@@ -2,11 +2,11 @@
 
 技術識別名稱：`AG-MONITOR-Smart-Video-Screening`
 
-目前正式版本：`v4.0.0`
+目前正式版本：`v4.0.1`
 
 ## 完整可攜版
 
-一般使用者可從 [GitHub Releases](https://github.com/lianghao02/AG-MONITOR-Smart-Video-Screening/releases/latest) 下載 `AG-MONITOR-Smart-Video-Screening-v4.0.0-win-x64-portable.zip`。完整解壓後執行 `AG-MONITOR.exe`，不需另行安裝 Python、pip、CUDA 或模型。
+一般使用者可從 [GitHub Releases](https://github.com/lianghao02/AG-MONITOR-Smart-Video-Screening/releases/latest) 下載 `AG-MONITOR-Smart-Video-Screening-v4.0.1-win-x64-portable.zip`。完整解壓後執行 `AG-MONITOR.exe`，不需另行安裝 Python、pip、CUDA 或模型。
 
 可攜版內含 CPU 通用 Runtime、YOLOv8n 相容回退，以及 YOLO11n／11s／12n／12s 四個模型。使用者截圖與執行紀錄放在外層 `data/`，不會與程式檔案混在一起。
 

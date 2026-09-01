@@ -1,4 +1,4 @@
-# AG-MONITOR v4.0.0 Windows x64 CPU 可攜版鎖定依賴
+# AG-MONITOR v4.0.1 Windows x64 CPU 可攜版鎖定依賴
 av==17.1.0
 bottle==0.13.4
 bottle-websocket==0.2.9

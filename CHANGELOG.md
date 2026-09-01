@@ -1,5 +1,14 @@
 # 📝 更新日誌 (CHANGELOG)
 
+## 未發布
+
+- **啟動器相容性**：`RUN.bat` 優先使用 PowerShell 7；未安裝時自動退回 Windows PowerShell 5.1，維持可攜 Python 自癒啟動流程。
+
+## 🚀 v4.0.1（2026-09-01）
+
+- **建置器帳號相容性**：修正不同 Windows 帳號執行發布器時的 Git 安全目錄判定，維持單次專案範圍，不寫入全域 Git 設定。
+- **可攜版品質檢核**：補齊核心測試與可攜發布需求，並同步更新版本、授權與下載說明。
+
 ## 🚀 v4.0.0（2026-08-28）
 
 - **產品識別**：介面名稱統一為 `AG-MONITOR 智慧影像快篩系統`，技術識別與 GitHub Repository 統一為 `AG-MONITOR-Smart-Video-Screening`，並加入離線 SVG 品牌圖示。
