@@ -10,7 +10,13 @@ dist/
 # AI 權重與模型檔案
 *.pt
 *.pb
+*.onnx
+*.engine
 yolov8n.pt
+
+# 二進制執行檔與啟動器編譯產物
+*.exe
+scripts/launcher/*.exe
 
 # 實體測試影片與輸出資料夾（避免大型資料進入版本庫）
 input_videos/
