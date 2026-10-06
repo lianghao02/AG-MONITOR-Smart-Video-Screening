@@ -83,10 +83,10 @@ if not exist "data\logs" mkdir "data\logs"
 if not exist "%YOLO_CONFIG_DIR%" mkdir "%YOLO_CONFIG_DIR%"
 if not exist "%MPLCONFIGDIR%" mkdir "%MPLCONFIGDIR%"
 
-"current\runtime\python.exe" -B -c "import av, cv2, eel, lap, torch, ultralytics" >"data\logs\startup_error.log" 2>&1
+"current\runtime\python.exe" -B -s -c "import av, cv2, eel, lap, torch, ultralytics" >"data\logs\startup_error.log" 2>&1
 if errorlevel 1 goto IMPORT_ERROR
 del /Q "data\logs\startup_error.log" >nul 2>&1
-start "" /D "%~dp0current" "%~dp0current\runtime\pythonw.exe" -B "main.py"
+start "" /D "%~dp0current" "%~dp0current\runtime\pythonw.exe" -B -s "main.py"
 exit /b 0
 
 :RUNTIME_ERROR
@@ -279,7 +279,7 @@ def verify_runtime_versions(runtime_python: Path) -> None:
         "for d in distributions() if d.metadata.get('Name')}, sort_keys=True))"
     )
     result = subprocess.run(
-        [str(runtime_python), "-B", "-c", code],
+        [str(runtime_python), "-B", "-s", "-c", code],
         cwd=CURRENT_DIR,
         check=True,
         capture_output=True,
@@ -310,7 +310,7 @@ def verify_models(runtime_python: Path) -> None:
     Path(env["YOLO_CONFIG_DIR"]).mkdir(parents=True, exist_ok=True)
     Path(env["MPLCONFIGDIR"]).mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
-        [str(runtime_python), "-B", "-c", script],
+        [str(runtime_python), "-B", "-s", "-c", script],
         cwd=CURRENT_DIR,
         env=env,
         capture_output=True,
