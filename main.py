@@ -89,9 +89,7 @@ class CONFIG:
     CAPTURES_DIR = _CAPTURES_DIR
     APP_TITLE = "AG-MONITOR 智慧影像快篩系統"
     
-    SMART_SKIP_SEC = 3.0   
-    MOTION_THRESH = 25     
-    MOTION_MIN_AREA = 500  
+    MOTION_THRESH = 25
     HASH_CHUNK_SIZE = 4 * 1024 * 1024
     DECODER_SLOW_WARN_SEC = 10.0
     DECODER_DEADLOCK_SEC = 30.0
@@ -107,7 +105,7 @@ class CONFIG:
     CAPTURE_QUEUE_SIZE = 8
     CAPTURE_JPEG_QUALITY = 95
     MODEL_ALLOWLIST = {
-        "yolov8n.pt", "yolov8s.pt",
+        "yolov8n.pt",
         "yolo11n.pt", "yolo11s.pt",
         "yolo12n.pt", "yolo12s.pt",
     }
@@ -165,15 +163,6 @@ def build_evidence_metadata(file_path):
         "modified": datetime.fromtimestamp(stat.st_mtime).astimezone().isoformat(timespec="seconds"),
         "sha256": calculate_sha256(absolute_path),
     }
-
-
-def format_enabled_classes(class_settings):
-    enabled = [
-        CONFIG.TARGET_CLASSES[class_id]
-        for class_id in CONFIG.TARGET_CLASSES
-        if class_settings.get(str(class_id), True)
-    ]
-    return ", ".join(enabled) if enabled else "無"
 
 
 def resolve_tracker_config(settings):
