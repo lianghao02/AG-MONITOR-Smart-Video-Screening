@@ -78,7 +78,7 @@ python_embed\python.exe -B -s tests\test_real_videos.py -v
 - **OpenCV**（ROI、動態引導、影像標註與 JPEG 編碼）
 - **Eel** (輕量化 WebSocket 前後端通訊與現代化 UI 渲染)
 
-後續功能規劃與實作紀錄請參閱 [`docs/FUTURE_ROADMAP.md`](docs/FUTURE_ROADMAP.md) 與 [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md)。
+歷史實作與追蹤器（BoT-SORT ReID）基準紀錄封存於 [`docs/archive/IMPLEMENTATION_PLAN.md`](docs/archive/IMPLEMENTATION_PLAN.md)；追蹤器比較與遮蔽掃描等研究腳本位於 `tools/`。
 
 ## 授權與公開聲明
 
