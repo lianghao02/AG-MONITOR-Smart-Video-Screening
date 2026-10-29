@@ -906,17 +906,16 @@
                     <div style="margin-bottom: 10px;">
                     <label class="form-label">辨識模型：</label>
                     <select id="aiModel" class="morandi-select" style="margin-bottom: 8px;">
-                        <option value="yolov8n.pt" data-label="YOLOv8n">YOLOv8n（檢查中）</option>
+                        <!-- YOLOv8n 僅作離線無法下載 YOLO11n 時的內部回退，不列入選單 -->
+                        <option value="yolov8n.pt" data-label="YOLOv8n" hidden>YOLOv8n（檢查中）</option>
                         <option value="yolo11n.pt" data-label="YOLO11n" selected>YOLO11n（檢查中）</option>
                         <option value="yolo11s.pt" data-label="YOLO11s">YOLO11s（檢查中）</option>
-                        <option value="yolo12n.pt" data-label="YOLO12n">YOLO12n（檢查中）</option>
                         <option value="yolo12s.pt" data-label="YOLO12s">YOLO12s（檢查中）</option>
                     </select>
                     
-                    <label class="form-label">追蹤與去重方式：</label>
-                    <select id="trackerMode" class="morandi-select" style="margin-bottom: 8px;">
+                    <!-- BoT-SORT ReID 尚無人工標註驗證，暫不開放；後端與 YAML 保留，驗證後可把選項加回 -->
+                    <select id="trackerMode" hidden>
                         <option value="bytetrack" selected>ByteTrack（穩定基準）</option>
-                        <option value="botsort_reid">BoT-SORT ReID（實驗性／遮蔽場景）</option>
                     </select>
 
                     <label class="form-label">辨識精度與速度：</label>
@@ -1213,8 +1212,8 @@
         function applyPreset(name) {
             const presets = {
                 standard: { model: 'yolo11n.pt', tracker: 'bytetrack', size: '960', skip: '0.2', hint: '一般路口：YOLO11n 平衡辨識速度，過濾停放車輛。' },
-                distant: { model: 'yolo12s.pt', tracker: 'botsort_reid', size: '1280', skip: '0.2', hint: '遠距小目標：YOLO12s Area Attention，提高解析度與精度。' },
-                occlusion: { model: 'yolo11s.pt', tracker: 'botsort_reid', size: '960', skip: '0.1', hint: '遮蔽車流：YOLO11s 搭配 ReID，加強短暫遮蔽追蹤。' }
+                distant: { model: 'yolo12s.pt', tracker: 'bytetrack', size: '1280', skip: '0.2', hint: '遠距小目標：YOLO12s Area Attention，提高解析度與精度。' },
+                occlusion: { model: 'yolo11s.pt', tracker: 'bytetrack', size: '960', skip: '0.1', hint: '遮蔽車流：YOLO11s 並縮短空景跳躍間隔至 0.1 秒，降低漏抓。' }
             };
             const preset = presets[name];
             if(!preset || isProcessing) return;
