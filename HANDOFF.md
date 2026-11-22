@@ -11,7 +11,13 @@
 ---
 
 ## 目前狀態
+2026-11-19：已發布 **v4.0.2**（`73cd23a`；`RUN.bat` 優先支援 PowerShell 7、`python_embed` 環境隔離、追蹤器／YOLO 模型選單收斂與停止追蹤模型二進位檔）；目前維持唯讀／維護狀態，詳見 [README.md](README.md) 與 [CHANGELOG.md](CHANGELOG.md)。
+
+<details><summary>前期交接紀錄（2026-10-06 環境修復）</summary>
+
 開發環境修復已驗證；本輪不包含正式發布。
+
+</details>
 
 ## 本輪目標
 依已授權計畫修復 Python 環境，保留既有功能與使用者資料。
